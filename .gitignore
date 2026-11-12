@@ -1,0 +1,20 @@
+# Ambiente Virtual e Cache Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Banco de Dados Local (Dados Pessoais)
+*.db
+*.sqlite3
+
+# macOS e IDEs
+.DS_Store
+.vscode/
+.idea/
+
+# Builds Flet / Flutter
+build/
+dist/
+EOF
