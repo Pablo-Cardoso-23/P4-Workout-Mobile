@@ -124,6 +124,18 @@ class RegistroBiometria(Base):
         )
 
 
+class LojaSuplemento(Base):
+    __tablename__ = "lojas_suplementos"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    nome: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+    url: Mapped[str] = mapped_column(String(255), nullable=False)
+    ativa: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    def __repr__(self) -> str:
+        return f"<LojaSuplemento(id={self.id}, nome='{self.nome}', url='{self.url}')>"
+
+
 class SuplementoEstoque(Base):
     __tablename__ = "suplementos_estoque"
 
@@ -139,6 +151,15 @@ class SuplementoEstoque(Base):
         Float, nullable=False, default=20.0
     )
     ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    loja_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("lojas_suplementos.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    loja: Mapped[Optional["LojaSuplemento"]] = relationship(
+        "LojaSuplemento", lazy="joined"
+    )
 
     def __repr__(self) -> str:
         return (

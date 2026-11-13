@@ -1,3 +1,4 @@
+from datetime import datetime
 import threading
 import time
 from typing import Any
@@ -6,25 +7,31 @@ import flet as ft
 
 from models.workout_models import Ficha
 from services.workout_service import (
+    excluir_sessao,
     finalizar_sessao,
     iniciar_sessao,
     listar_fichas,
+    listar_historico_sessoes,
     obter_ficha_por_id,
     obter_metricas_resumo,
     obter_ultima_execucao_exercicio,
     registrar_serie,
+    registrar_treino_muscular_manual,
 )
 from views.routines_view import (
     CARD_BG,
     DANGER_RED,
     DARK_BG,
     ORCELA_BLUE,
+    ORCELA_BORDER_GLOW,
+    ORCELA_BORDER_HIGHLIGHT,
     ORCELA_DARK_SURFACE,
     PURE_WHITE,
     SURFACE_BORDER,
     TEXT_MUTED,
     construir_borda_input,
     construir_logo_p4,
+    construir_sombra_orcela,
 )
 
 TIPOS_SERIE = [
@@ -45,13 +52,15 @@ def _extrair_reps_padrao(reps_alvo: str) -> int:
 
 
 def build_train_view(page: ft.Page) -> ft.Control:
-    """Constrói a view modular de Execução de Treino e Resumo Principal."""
+    """Constrói a view modular de Execução de Treino, Registro Manual e Histórico."""
     sessao_ativa_id: int | None = None
     ficha_ativa: Ficha | None = None
     series_concluidas: set[tuple[int, int]] = set()
     timer_segundos_restantes: int = 0
     timer_rodando: bool = False
     timer_token: int = 0
+    form_manual_visivel: bool = False
+    confirmando_fim_ativo: bool = False
 
     container_raiz = ft.Column(
         scroll=ft.ScrollMode.AUTO,
@@ -69,11 +78,70 @@ def build_train_view(page: ft.Page) -> ft.Control:
         value=0.0,
         color=ORCELA_BLUE,
         bgcolor=SURFACE_BORDER,
-        height=6,
+        bar_height=8,
+        border_radius=ft.BorderRadius.all(10),
     )
 
     tf_notas_sessao = ft.TextField(
         label="Notas do treino (opcional)",
+        border=construir_borda_input(),
+        color=PURE_WHITE,
+        text_size=13,
+    )
+    tf_fc_ativo = ft.TextField(
+        label="FC Média (bpm)",
+        keyboard_type=ft.KeyboardType.NUMBER,
+        border=construir_borda_input(),
+        color=PURE_WHITE,
+        text_size=13,
+        expand=True,
+    )
+    tf_rpe_ativo = ft.TextField(
+        label="RPE Geral (1-10)",
+        value="8",
+        keyboard_type=ft.KeyboardType.NUMBER,
+        border=construir_borda_input(),
+        color=PURE_WHITE,
+        text_size=13,
+        width=135,
+    )
+
+    # Controles do Registro Manual de Treino Muscular
+    dd_ficha_manual = ft.Dropdown(
+        label="Ficha Realizada (ou Treino Livre)",
+        value="0",
+        border=construir_borda_input(),
+        color=PURE_WHITE,
+        expand=True,
+    )
+    tf_duracao_manual = ft.TextField(
+        label="Duração (min)",
+        value="55",
+        keyboard_type=ft.KeyboardType.NUMBER,
+        border=construir_borda_input(),
+        color=PURE_WHITE,
+        text_size=13,
+        expand=True,
+    )
+    tf_fc_manual = ft.TextField(
+        label="FC Média (bpm)",
+        keyboard_type=ft.KeyboardType.NUMBER,
+        border=construir_borda_input(),
+        color=PURE_WHITE,
+        text_size=13,
+        expand=True,
+    )
+    tf_rpe_manual = ft.TextField(
+        label="RPE (1-10)",
+        value="8",
+        keyboard_type=ft.KeyboardType.NUMBER,
+        border=construir_borda_input(),
+        color=PURE_WHITE,
+        text_size=13,
+        width=100,
+    )
+    tf_notas_manual = ft.TextField(
+        label="Notas / Observações (opcional)",
         border=construir_borda_input(),
         color=PURE_WHITE,
         text_size=13,
@@ -142,7 +210,8 @@ def build_train_view(page: ft.Page) -> ft.Control:
         return ft.Container(
             expand=True,
             bgcolor=CARD_BG,
-            border=ft.Border.all(1, SURFACE_BORDER),
+            border=ft.Border.all(1, ORCELA_BORDER_GLOW),
+            shadow=construir_sombra_orcela(),
             border_radius=12,
             padding=14,
             content=ft.Column(
@@ -160,8 +229,48 @@ def build_train_view(page: ft.Page) -> ft.Control:
             ),
         )
 
+    def alternar_form_manual(_: Any = None) -> None:
+        nonlocal form_manual_visivel
+        form_manual_visivel = not form_manual_visivel
+        renderizar()
+
+    def salvar_treino_manual(_: Any = None) -> None:
+        nonlocal form_manual_visivel
+        try:
+            fid_val = int(dd_ficha_manual.value or "0")
+            ficha_id_sel = fid_val if fid_val > 0 else None
+            dur_min = int(float((tf_duracao_manual.value or "50").replace(",", ".")))
+            fc_val = (
+                int(tf_fc_manual.value)
+                if (tf_fc_manual.value and tf_fc_manual.value.strip())
+                else None
+            )
+            rpe_val = int(tf_rpe_manual.value or "8")
+            sessao = registrar_treino_muscular_manual(
+                ficha_id=ficha_id_sel,
+                data_treino=datetime.now(),
+                duracao_minutos=dur_min,
+                fc_media=fc_val,
+                percepcao_esforco=rpe_val,
+                notas=tf_notas_manual.value,
+            )
+            tf_notas_manual.value = ""
+            tf_fc_manual.value = ""
+            form_manual_visivel = False
+            notificar(
+                f"Treino manual salvo! {dur_min} min • ~{sessao.calorias_estimadas} kcal"
+            )
+            renderizar()
+        except Exception as exc:
+            notificar(str(exc), erro=True)
+
+    def remover_sessao_historico(sessao_id: int) -> None:
+        excluir_sessao(sessao_id)
+        notificar("Sessão removida do histórico.")
+        renderizar()
+
     def comecar_treino(ficha_id: int) -> None:
-        nonlocal sessao_ativa_id, ficha_ativa
+        nonlocal sessao_ativa_id, ficha_ativa, confirmando_fim_ativo
         ficha_carregada = obter_ficha_por_id(ficha_id)
         if ficha_carregada is None:
             notificar("Ficha não encontrada.", erro=True)
@@ -170,22 +279,53 @@ def build_train_view(page: ft.Page) -> ft.Control:
         sessao = iniciar_sessao(ficha_id=ficha_id)
         sessao_ativa_id = sessao.id
         ficha_ativa = ficha_carregada
+        confirmando_fim_ativo = False
         series_concluidas.clear()
         tf_notas_sessao.value = ""
-        parar_cronometro()
+        tf_fc_ativo.value = ""
+        tf_rpe_ativo.value = "8"
+        parar_cronometro(atualizar_pagina=False)
+        renderizar()
+
+    def abrir_confirmacao_fim_treino(_: Any = None) -> None:
+        nonlocal confirmando_fim_ativo
+        confirmando_fim_ativo = True
         renderizar()
 
     def concluir_treino_ativo(_: Any = None) -> None:
-        nonlocal sessao_ativa_id, ficha_ativa
+        nonlocal sessao_ativa_id, ficha_ativa, confirmando_fim_ativo
         if sessao_ativa_id is None:
             return
-        parar_cronometro()
-        finalizar_sessao(sessao_id=sessao_ativa_id, notas=tf_notas_sessao.value)
+        parar_cronometro(atualizar_pagina=False)
+        try:
+            fc_val = (
+                int(tf_fc_ativo.value)
+                if (tf_fc_ativo.value and tf_fc_ativo.value.strip())
+                else None
+            )
+            rpe_val = (
+                int(tf_rpe_ativo.value)
+                if (tf_rpe_ativo.value and tf_rpe_ativo.value.strip())
+                else 8
+            )
+        except ValueError:
+            fc_val = None
+            rpe_val = 8
+
+        sessao_fin = finalizar_sessao(
+            sessao_id=sessao_ativa_id,
+            notas=tf_notas_sessao.value,
+            fc_media=fc_val,
+            percepcao_esforco=rpe_val,
+        )
         total_series = len(series_concluidas)
         sessao_ativa_id = None
         ficha_ativa = None
+        confirmando_fim_ativo = False
         series_concluidas.clear()
-        notificar(f"Treino finalizado! {total_series} série(s) registrada(s).")
+        notificar(
+            f"Treino finalizado! {total_series} série(s) • ~{sessao_fin.calorias_estimadas or 0} kcal"
+        )
         renderizar()
 
     def construir_linha_serie(
@@ -252,7 +392,7 @@ def build_train_view(page: ft.Page) -> ft.Control:
         linha_container = ft.Container(
             bgcolor=ORCELA_DARK_SURFACE if ja_concluida else DARK_BG,
             border=ft.Border.all(
-                1, ORCELA_BLUE if ja_concluida else SURFACE_BORDER
+                1, ORCELA_BLUE if ja_concluida else ORCELA_BORDER_GLOW
             ),
             border_radius=8,
             padding=ft.Padding.symmetric(horizontal=8, vertical=6),
@@ -349,7 +489,11 @@ def build_train_view(page: ft.Page) -> ft.Control:
                 )
                 carga_sug = serie_ant.carga_kg if serie_ant else 20.0
                 reps_sug = serie_ant.repeticoes if serie_ant else reps_padrao
-                rir_sug = serie_ant.rir if (serie_ant and serie_ant.rir is not None) else 2
+                rir_sug = (
+                    serie_ant.rir
+                    if (serie_ant and serie_ant.rir is not None)
+                    else 2
+                )
                 tipo_sug = serie_ant.tipo_serie if serie_ant else "W"
 
                 linhas_series.append(
@@ -367,7 +511,8 @@ def build_train_view(page: ft.Page) -> ft.Control:
             blocos_exercicios.append(
                 ft.Container(
                     bgcolor=CARD_BG,
-                    border=ft.Border.all(1, SURFACE_BORDER),
+                    border=ft.Border.all(1, ORCELA_BORDER_GLOW),
+                    shadow=construir_sombra_orcela(),
                     border_radius=14,
                     padding=14,
                     content=ft.Column(
@@ -415,6 +560,59 @@ def build_train_view(page: ft.Page) -> ft.Control:
                 )
             )
 
+        bloco_finalizacao: list[ft.Control] = []
+        if confirmando_fim_ativo:
+            bloco_finalizacao.append(
+                ft.Container(
+                    bgcolor=CARD_BG,
+                    border=ft.Border.all(1, ORCELA_BORDER_HIGHLIGHT),
+                    shadow=construir_sombra_orcela(),
+                    border_radius=12,
+                    padding=14,
+                    content=ft.Column(
+                        spacing=10,
+                        controls=[
+                            ft.Text(
+                                "Resumo de Intensidade da Sessão",
+                                size=14,
+                                weight=ft.FontWeight.BOLD,
+                                color=PURE_WHITE,
+                            ),
+                            ft.Row(spacing=8, controls=[tf_fc_ativo, tf_rpe_ativo]),
+                            tf_notas_sessao,
+                            ft.Button(
+                                content="CONFIRMAR E SALVAR TREINO",
+                                icon=ft.Icons.CHECK_CIRCLE_ROUNDED,
+                                bgcolor=ORCELA_BLUE,
+                                color=PURE_WHITE,
+                                width=float("inf"),
+                                style=ft.ButtonStyle(
+                                    shape=ft.RoundedRectangleBorder(radius=10),
+                                ),
+                                on_click=concluir_treino_ativo,
+                            ),
+                        ],
+                    ),
+                )
+            )
+        else:
+            bloco_finalizacao.extend(
+                [
+                    tf_notas_sessao,
+                    ft.Button(
+                        content="FINALIZAR TREINO",
+                        icon=ft.Icons.CHECK_CIRCLE_ROUNDED,
+                        bgcolor=ORCELA_BLUE,
+                        color=PURE_WHITE,
+                        width=float("inf"),
+                        style=ft.ButtonStyle(
+                            shape=ft.RoundedRectangleBorder(radius=10),
+                        ),
+                        on_click=abrir_confirmacao_fim_treino,
+                    ),
+                ]
+            )
+
         return [
             ft.Row(
                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
@@ -449,7 +647,8 @@ def build_train_view(page: ft.Page) -> ft.Control:
             ),
             ft.Container(
                 bgcolor=CARD_BG,
-                border=ft.Border.all(1, ORCELA_BLUE),
+                border=ft.Border.all(1, ORCELA_BORDER_HIGHLIGHT),
+                shadow=construir_sombra_orcela(),
                 border_radius=12,
                 padding=12,
                 content=ft.Column(
@@ -473,7 +672,7 @@ def build_train_view(page: ft.Page) -> ft.Control:
                                     icon=ft.Icons.STOP_CIRCLE_OUTLINED,
                                     icon_color=TEXT_MUTED,
                                     tooltip="Zerar descanso",
-                                    on_click=parar_cronometro,
+                                    on_click=lambda _: parar_cronometro(True),
                                 ),
                             ],
                         ),
@@ -482,23 +681,23 @@ def build_train_view(page: ft.Page) -> ft.Control:
                 ),
             ),
             *blocos_exercicios,
-            tf_notas_sessao,
-            ft.Button(
-                content="FINALIZAR TREINO",
-                icon=ft.Icons.CHECK_CIRCLE_ROUNDED,
-                bgcolor=ORCELA_BLUE,
-                color=PURE_WHITE,
-                width=float("inf"),
-                style=ft.ButtonStyle(
-                    shape=ft.RoundedRectangleBorder(radius=10),
-                ),
-                on_click=concluir_treino_ativo,
-            ),
+            *bloco_finalizacao,
         ]
 
     def renderizar_modo_resumo() -> list[ft.Control]:
         metricas = obter_metricas_resumo()
         fichas_ativas = listar_fichas(apenas_ativas=True)
+        historico_sessoes = listar_historico_sessoes(limite=20)
+
+        dd_ficha_manual.options = [
+            ft.dropdown.Option(key="0", text="Treino Livre / Avulso"),
+            *[
+                ft.dropdown.Option(key=str(f.id), text=f.nome)
+                for f in fichas_ativas
+            ],
+        ]
+        if not dd_ficha_manual.value:
+            dd_ficha_manual.value = "0"
 
         cards_fichas: list[ft.Control] = []
         for ficha in fichas_ativas:
@@ -526,7 +725,8 @@ def build_train_view(page: ft.Page) -> ft.Control:
             cards_fichas.append(
                 ft.Container(
                     bgcolor=CARD_BG,
-                    border=ft.Border.all(1, SURFACE_BORDER),
+                    border=ft.Border.all(1, ORCELA_BORDER_HIGHLIGHT),
+                    shadow=construir_sombra_orcela(),
                     border_radius=14,
                     padding=16,
                     content=ft.Column(
@@ -583,22 +783,157 @@ def build_train_view(page: ft.Page) -> ft.Control:
                 )
             )
 
-        return [
+        cards_historico: list[ft.Control] = []
+        if not historico_sessoes:
+            cards_historico.append(
+                ft.Container(
+                    bgcolor=CARD_BG,
+                    border=ft.Border.all(1, ORCELA_BORDER_GLOW),
+                    shadow=construir_sombra_orcela(),
+                    border_radius=12,
+                    padding=16,
+                    content=ft.Text(
+                        "Nenhum treino muscular concluído ainda. Inicie uma sessão acima ou use 'Registrar Treino Manual'.",
+                        size=12,
+                        color=TEXT_MUTED,
+                    ),
+                )
+            )
+        else:
+            for hs in historico_sessoes:
+                partes_badge: list[str] = []
+                if hs["percepcao_esforco"] is not None:
+                    partes_badge.append(f"RPE {hs['percepcao_esforco']}/10")
+                if hs["fc_media"] is not None:
+                    partes_badge.append(f"{hs['fc_media']} bpm")
+                texto_intensidade = (
+                    " • ".join(partes_badge) if partes_badge else "Concluído"
+                )
+
+                tonelagem_str = (
+                    f"{hs['tonelagem_kg']:.0f} kg vol"
+                    if hs["tonelagem_kg"] > 0
+                    else f"{hs['calorias_estimadas']} kcal"
+                )
+
+                controles_card_hist: list[ft.Control] = [
+                    ft.Row(
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        spacing=8,
+                        controls=[
+                            ft.Column(
+                                spacing=2,
+                                expand=True,
+                                controls=[
+                                    ft.Text(
+                                        str(hs["nome_ficha"]),
+                                        size=14,
+                                        weight=ft.FontWeight.BOLD,
+                                        color=PURE_WHITE,
+                                    ),
+                                    ft.Text(
+                                        f"{hs['data_fmt']} • {hs['duracao_fmt']}",
+                                        size=11,
+                                        color=TEXT_MUTED,
+                                    ),
+                                ],
+                            ),
+                            ft.Container(
+                                bgcolor=ORCELA_DARK_SURFACE,
+                                padding=ft.Padding.symmetric(
+                                    horizontal=8, vertical=4
+                                ),
+                                border_radius=6,
+                                content=ft.Text(
+                                    texto_intensidade,
+                                    size=10,
+                                    weight=ft.FontWeight.BOLD,
+                                    color=ORCELA_BLUE,
+                                ),
+                            ),
+                            ft.IconButton(
+                                icon=ft.Icons.DELETE_OUTLINE_ROUNDED,
+                                icon_color=DANGER_RED,
+                                tooltip="Excluir treino",
+                                on_click=lambda _, sid=hs["id"]: remover_sessao_historico(
+                                    sid
+                                ),
+                            ),
+                        ],
+                    ),
+                    ft.Row(
+                        spacing=12,
+                        controls=[
+                            ft.Text(
+                                f"Volume: {tonelagem_str}",
+                                size=12,
+                                color=ORCELA_BLUE,
+                                weight=ft.FontWeight.BOLD,
+                            ),
+                            ft.Text(
+                                f"{hs['total_series']} séries • ~{hs['calorias_estimadas']} kcal",
+                                size=12,
+                                color=PURE_WHITE,
+                            ),
+                        ],
+                    ),
+                ]
+
+                if hs["resumo_exercicios"]:
+                    controles_card_hist.append(
+                        ft.Text(
+                            " | ".join(hs["resumo_exercicios"]),
+                            size=11,
+                            color=TEXT_MUTED,
+                        )
+                    )
+                if hs["notas"]:
+                    controles_card_hist.append(
+                        ft.Text(
+                            f"Nota: {hs['notas']}",
+                            size=11,
+                            color=TEXT_MUTED,
+                        )
+                    )
+
+                cards_historico.append(
+                    ft.Container(
+                        bgcolor=CARD_BG,
+                        border=ft.Border.all(1, ORCELA_BORDER_GLOW),
+                        shadow=construir_sombra_orcela(),
+                        border_radius=12,
+                        padding=14,
+                        content=ft.Column(spacing=6, controls=controles_card_hist),
+                    )
+                )
+
+        controles_topo: list[ft.Control] = [
             ft.Row(
                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                spacing=8,
                 controls=[
                     ft.Column(
                         spacing=2,
+                        expand=True,
                         controls=[
                             construir_logo_p4(),
                             ft.Text(
-                                "SQLite Offline-First Ativo",
+                                "Treino & Histórico",
                                 size=12,
                                 color=TEXT_MUTED,
                             ),
                         ],
                     ),
-                    ft.Icon(ft.Icons.BOLT_ROUNDED, color=ORCELA_BLUE, size=28),
+                    ft.OutlinedButton(
+                        content="Registrar Treino Manual",
+                        icon=ft.Icons.ADD_ROUNDED,
+                        style=ft.ButtonStyle(
+                            padding=ft.Padding.symmetric(horizontal=10, vertical=6),
+                        ),
+                        on_click=alternar_form_manual,
+                    ),
                 ],
             ),
             ft.Row(
@@ -621,6 +956,64 @@ def build_train_view(page: ft.Page) -> ft.Control:
                     ),
                 ],
             ),
+        ]
+
+        if form_manual_visivel:
+            controles_topo.append(
+                ft.Container(
+                    bgcolor=CARD_BG,
+                    border=ft.Border.all(1, ORCELA_BORDER_HIGHLIGHT),
+                    shadow=construir_sombra_orcela(),
+                    border_radius=14,
+                    padding=16,
+                    content=ft.Column(
+                        spacing=10,
+                        controls=[
+                            ft.Row(
+                                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                                controls=[
+                                    ft.Text(
+                                        "Registrar Treino Muscular Manual",
+                                        size=15,
+                                        weight=ft.FontWeight.BOLD,
+                                        color=PURE_WHITE,
+                                        expand=True,
+                                    ),
+                                    ft.IconButton(
+                                        icon=ft.Icons.CLOSE_ROUNDED,
+                                        icon_color=TEXT_MUTED,
+                                        on_click=alternar_form_manual,
+                                    ),
+                                ],
+                            ),
+                            ft.Row(controls=[dd_ficha_manual]),
+                            ft.Row(
+                                spacing=8,
+                                controls=[
+                                    tf_duracao_manual,
+                                    tf_fc_manual,
+                                    tf_rpe_manual,
+                                ],
+                            ),
+                            tf_notas_manual,
+                            ft.Button(
+                                content="SALVAR TREINO MANUAL",
+                                icon=ft.Icons.CHECK_ROUNDED,
+                                bgcolor=ORCELA_BLUE,
+                                color=PURE_WHITE,
+                                width=float("inf"),
+                                style=ft.ButtonStyle(
+                                    shape=ft.RoundedRectangleBorder(radius=10),
+                                ),
+                                on_click=salvar_treino_manual,
+                            ),
+                        ],
+                    ),
+                )
+            )
+
+        return [
+            *controles_topo,
             ft.Text(
                 "PRONTO PARA TREINAR",
                 size=13,
@@ -628,6 +1021,13 @@ def build_train_view(page: ft.Page) -> ft.Control:
                 color=TEXT_MUTED,
             ),
             *cards_fichas,
+            ft.Text(
+                "HISTÓRICO DE TREINOS MUSCULARES",
+                size=13,
+                weight=ft.FontWeight.BOLD,
+                color=TEXT_MUTED,
+            ),
+            *cards_historico,
         ]
 
     def renderizar(atualizar_pagina: bool = True) -> None:

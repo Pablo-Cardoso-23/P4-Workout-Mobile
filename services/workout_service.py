@@ -1,10 +1,11 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import selectinload
 
 from core.database import get_db_session
+from models.nutrition_models import RegistroBiometria
 from models.workout_models import (
     Exercicio,
     Ficha,
@@ -14,16 +15,45 @@ from models.workout_models import (
 )
 
 
+def _formatar_duracao(segundos: int | None) -> str:
+    if not segundos or segundos <= 0:
+        return "-- min"
+    minutos_totais = max(1, int(round(segundos / 60.0)))
+    horas, mins = divmod(minutos_totais, 60)
+    if horas > 0:
+        return f"{horas}h {mins:02d}min"
+    return f"{mins} min"
+
+
+def _obter_peso_referencia(session: Any, peso_sessao: float | None = None) -> float:
+    if peso_sessao is not None and peso_sessao > 0:
+        return float(peso_sessao)
+    peso_bio = session.scalar(
+        select(RegistroBiometria.peso_kg)
+        .order_by(desc(RegistroBiometria.data), desc(RegistroBiometria.id))
+        .limit(1)
+    )
+    return float(peso_bio) if peso_bio is not None else 77.6
+
+
 def obter_metricas_resumo() -> dict[str, int]:
     """Retorna os contadores gerais do banco SQLite local."""
     with get_db_session() as session:
         total_exercicios = session.scalar(select(func.count(Exercicio.id))) or 0
-        total_fichas = session.scalar(
-            select(func.count(Ficha.id)).where(Ficha.ativa.is_(True))
-        ) or 0
-        total_sessoes = session.scalar(
-            select(func.count(SessaoTreino.id)).where(SessaoTreino.data_fim.is_not(None))
-        ) or 0
+        total_fichas = (
+            session.scalar(
+                select(func.count(Ficha.id)).where(Ficha.ativa.is_(True))
+            )
+            or 0
+        )
+        total_sessoes = (
+            session.scalar(
+                select(func.count(SessaoTreino.id)).where(
+                    SessaoTreino.data_fim.is_not(None)
+                )
+            )
+            or 0
+        )
         return {
             "total_exercicios": total_exercicios,
             "total_fichas": total_fichas,
@@ -220,14 +250,157 @@ def registrar_serie(
         return serie
 
 
-def finalizar_sessao(sessao_id: int, notas: str | None = None) -> SessaoTreino:
-    """Encerra a sessão de treino gravando o timestamp de término e observações."""
+def finalizar_sessao(
+    sessao_id: int,
+    notas: str | None = None,
+    fc_media: int | None = None,
+    percepcao_esforco: int | None = None,
+) -> SessaoTreino:
+    """Encerra a sessão de treino calculando duração, calorias (6.0 METs), FC e RPE."""
     with get_db_session() as session:
         sessao = session.get(SessaoTreino, sessao_id)
         if sessao is None:
             raise ValueError(f"Sessão #{sessao_id} não encontrada.")
-        sessao.data_fim = datetime.now()
+
+        agora = datetime.now()
+        sessao.data_fim = agora
+        duracao_seg = max(
+            60, int(round((agora - sessao.data_inicio).total_seconds()))
+        )
+        sessao.duracao_segundos = duracao_seg
+
+        peso_ref = _obter_peso_referencia(session, sessao.peso_corporal_kg)
+        horas = duracao_seg / 3600.0
+        sessao.calorias_estimadas = max(1, int(round(6.0 * peso_ref * horas)))
+
+        if fc_media is not None and fc_media > 0:
+            sessao.fc_media = int(fc_media)
+        if percepcao_esforco is not None:
+            sessao.percepcao_esforco = min(10, max(1, int(percepcao_esforco)))
         if notas is not None and notas.strip():
             sessao.notas = notas.strip()
+
         session.flush()
         return sessao
+
+
+def registrar_treino_muscular_manual(
+    ficha_id: int | None,
+    data_treino: datetime,
+    duracao_minutos: int,
+    fc_media: int | None = None,
+    percepcao_esforco: int = 8,
+    notas: str | None = None,
+    series_manuais: list[dict[str, Any]] | None = None,
+) -> SessaoTreino:
+    """Registra manualmente uma sessão de musculação já finalizada com duração, FC, RPE e séries."""
+    if duracao_minutos <= 0:
+        raise ValueError("A duração em minutos deve ser maior que zero.")
+
+    duracao_seg = int(duracao_minutos) * 60
+    data_fim = data_treino
+    data_inicio = data_treino - timedelta(seconds=duracao_seg)
+
+    with get_db_session() as session:
+        peso_ref = _obter_peso_referencia(session)
+        calorias = max(1, int(round(6.0 * peso_ref * (duracao_seg / 3600.0))))
+
+        nova_sessao = SessaoTreino(
+            ficha_id=ficha_id,
+            data_inicio=data_inicio,
+            data_fim=data_fim,
+            peso_corporal_kg=peso_ref,
+            duracao_segundos=duracao_seg,
+            fc_media=int(fc_media) if (fc_media is not None and fc_media > 0) else None,
+            calorias_estimadas=calorias,
+            percepcao_esforco=min(10, max(1, int(percepcao_esforco))),
+            notas=notas.strip() if (notas and notas.strip()) else None,
+        )
+        session.add(nova_sessao)
+        session.flush()
+
+        if series_manuais:
+            for idx, item in enumerate(series_manuais, start=1):
+                serie = SerieExecutada(
+                    sessao_id=nova_sessao.id,
+                    exercicio_id=int(item["exercicio_id"]),
+                    numero_serie=int(item.get("numero_serie", idx)),
+                    carga_kg=float(item.get("carga_kg", 0.0)),
+                    repeticoes=int(item.get("repeticoes", 0)),
+                    rir=int(item["rir"]) if item.get("rir") is not None else None,
+                    tipo_serie=str(item.get("tipo_serie", "W")).upper(),
+                )
+                session.add(serie)
+            session.flush()
+
+        stmt = (
+            select(SessaoTreino)
+            .where(SessaoTreino.id == nova_sessao.id)
+            .options(selectinload(SessaoTreino.series))
+        )
+        return session.scalar(stmt) or nova_sessao
+
+
+def listar_historico_sessoes(limite: int = 20) -> list[dict[str, Any]]:
+    """Retorna as sessões finalizadas ordenadas da mais recente para a mais antiga."""
+    with get_db_session() as session:
+        stmt = (
+            select(SessaoTreino)
+            .where(SessaoTreino.data_fim.is_not(None))
+            .options(
+                selectinload(SessaoTreino.ficha),
+                selectinload(SessaoTreino.series).joinedload(SerieExecutada.exercicio),
+            )
+            .order_by(desc(SessaoTreino.data_fim), desc(SessaoTreino.id))
+            .limit(max(1, limite))
+        )
+        sessoes = list(session.scalars(stmt).all())
+
+        resultado: list[dict[str, Any]] = []
+        for s in sessoes:
+            nome_ficha = s.ficha.nome if s.ficha is not None else "Treino Livre"
+            data_ref = s.data_fim or s.data_inicio
+            duracao_seg = s.duracao_segundos
+            if duracao_seg is None and s.data_fim is not None:
+                duracao_seg = max(
+                    60, int(round((s.data_fim - s.data_inicio).total_seconds()))
+                )
+
+            tonelagem = round(
+                sum(float(sr.carga_kg) * int(sr.repeticoes) for sr in s.series),
+                1,
+            )
+            total_series = len(s.series)
+            calorias = s.calorias_estimadas
+            if calorias is None and duracao_seg:
+                calorias = max(1, int(round(6.0 * 77.6 * (duracao_seg / 3600.0))))
+
+            resumo_exercicios = [
+                f"{sr.exercicio.nome if sr.exercicio else 'Ex'}: {sr.carga_kg:g}kg x {sr.repeticoes}"
+                for sr in s.series[:4]
+            ]
+
+            resultado.append(
+                {
+                    "id": s.id,
+                    "nome_ficha": nome_ficha,
+                    "data_fmt": data_ref.strftime("%d/%m/%Y %H:%M"),
+                    "duracao_fmt": _formatar_duracao(duracao_seg),
+                    "tonelagem_kg": tonelagem,
+                    "total_series": total_series,
+                    "fc_media": s.fc_media,
+                    "calorias_estimadas": calorias or 0,
+                    "percepcao_esforco": s.percepcao_esforco,
+                    "notas": s.notas,
+                    "resumo_exercicios": resumo_exercicios,
+                }
+            )
+        return resultado
+
+
+def excluir_sessao(sessao_id: int) -> None:
+    """Remove uma sessão de treino muscular do banco de dados."""
+    with get_db_session() as session:
+        sessao = session.get(SessaoTreino, sessao_id)
+        if sessao is not None:
+            session.delete(sessao)

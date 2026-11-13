@@ -12,6 +12,9 @@ from services.workout_service import (
 
 ORCELA_BLUE = "#007BFF"
 ORCELA_DARK_SURFACE = "#002B5C"
+ORCELA_BORDER_GLOW = "#33007BFF"
+ORCELA_BORDER_HIGHLIGHT = "#4D007BFF"
+ORCELA_SHADOW_COLOR = "#1A007BFF"
 PURE_WHITE = "#FFFFFF"
 DARK_BG = "#0F0F0F"
 CARD_BG = "#1A1A1A"
@@ -31,11 +34,20 @@ GRUPOS_MUSCULARES = [
 EQUIPAMENTOS = ["Barra", "Halter", "Máquina", "Polia", "Peso Corporal"]
 
 
+def construir_sombra_orcela() -> ft.BoxShadow:
+    """Retorna a sombra suave em Azul Orcela translúcido para os cards."""
+    return ft.BoxShadow(
+        color=ORCELA_SHADOW_COLOR,
+        blur_radius=12,
+        spread_radius=0,
+    )
+
+
 def construir_borda_input(raio: float = 8.0) -> dict[ft.ControlState, ft.InputBorder]:
     """Cria o mapeamento moderno de bordas Flet 1.x sem DeprecationWarning."""
     return {
         ft.ControlState.DEFAULT: ft.OutlineInputBorder(
-            side=ft.BorderSide(width=1, color=SURFACE_BORDER),
+            side=ft.BorderSide(width=1, color=ORCELA_BORDER_GLOW),
             border_radius=raio,
         ),
         ft.ControlState.FOCUSED: ft.OutlineInputBorder(
@@ -259,7 +271,8 @@ def build_routines_view(page: ft.Page) -> ft.Control:
     def construir_painel_novo_exercicio(fechar_callback: Any) -> ft.Container:
         return ft.Container(
             bgcolor=DARK_BG,
-            border=ft.Border.all(1, ORCELA_BLUE),
+            border=ft.Border.all(1, ORCELA_BORDER_HIGHLIGHT),
+            shadow=construir_sombra_orcela(),
             border_radius=10,
             padding=12,
             content=ft.Column(
@@ -273,6 +286,7 @@ def build_routines_view(page: ft.Page) -> ft.Control:
                                 size=14,
                                 weight=ft.FontWeight.BOLD,
                                 color=PURE_WHITE,
+                                expand=True,
                             ),
                             ft.IconButton(
                                 icon=ft.Icons.CLOSE_ROUNDED,
@@ -356,7 +370,7 @@ def build_routines_view(page: ft.Page) -> ft.Control:
                 linhas_rascunho.append(
                     ft.Container(
                         bgcolor=DARK_BG,
-                        border=ft.Border.all(1, SURFACE_BORDER),
+                        border=ft.Border.all(1, ORCELA_BORDER_GLOW),
                         border_radius=8,
                         padding=ft.Padding.symmetric(horizontal=10, vertical=6),
                         content=ft.Row(
@@ -398,6 +412,7 @@ def build_routines_view(page: ft.Page) -> ft.Control:
                             size=16,
                             weight=ft.FontWeight.BOLD,
                             color=PURE_WHITE,
+                            expand=True,
                         ),
                         ft.IconButton(
                             icon=ft.Icons.CLOSE_ROUNDED,
@@ -422,7 +437,7 @@ def build_routines_view(page: ft.Page) -> ft.Control:
                             expand=True,
                         ),
                         ft.OutlinedButton(
-                            content="+ Exercício",
+                            content="Novo Exercício",
                             icon=ft.Icons.ADD_ROUNDED,
                             style=ft.ButtonStyle(
                                 padding=ft.Padding.symmetric(horizontal=10, vertical=6),
@@ -474,7 +489,8 @@ def build_routines_view(page: ft.Page) -> ft.Control:
             controles.append(
                 ft.Container(
                     bgcolor=CARD_BG,
-                    border=ft.Border.all(1, ORCELA_BLUE),
+                    border=ft.Border.all(1, ORCELA_BORDER_HIGHLIGHT),
+                    shadow=construir_sombra_orcela(),
                     border_radius=14,
                     padding=16,
                     content=ft.Column(spacing=12, controls=controles_form_ficha),
@@ -494,7 +510,8 @@ def build_routines_view(page: ft.Page) -> ft.Control:
             controles.append(
                 ft.Container(
                     bgcolor=CARD_BG,
-                    border=ft.Border.all(1, SURFACE_BORDER),
+                    border=ft.Border.all(1, ORCELA_BORDER_GLOW),
+                    shadow=construir_sombra_orcela(),
                     border_radius=12,
                     padding=20,
                     content=ft.Text(
@@ -514,6 +531,7 @@ def build_routines_view(page: ft.Page) -> ft.Control:
                                 f"{item.ordem}. {item.exercicio.nome}",
                                 size=13,
                                 color=PURE_WHITE,
+                                expand=True,
                             ),
                             ft.Container(
                                 bgcolor=ORCELA_DARK_SURFACE,
@@ -534,7 +552,8 @@ def build_routines_view(page: ft.Page) -> ft.Control:
                 controles.append(
                     ft.Container(
                         bgcolor=CARD_BG,
-                        border=ft.Border.all(1, SURFACE_BORDER),
+                        border=ft.Border.all(1, ORCELA_BORDER_GLOW),
+                        shadow=construir_sombra_orcela(),
                         border_radius=14,
                         padding=16,
                         content=ft.Column(

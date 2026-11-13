@@ -1,5 +1,6 @@
 from datetime import date, timedelta
-from typing import Any
+from typing import Any, Callable
+import webbrowser
 
 import flet as ft
 
@@ -16,8 +17,11 @@ from services.nutrition_service import (
     atualizar_metas,
     consumir_suplemento,
     criar_item_checklist,
+    criar_loja_suplemento,
     criar_suplemento_estoque,
+    excluir_loja_suplemento,
     listar_estoque_suplementos,
+    listar_lojas_suplementos,
     obter_ou_criar_dia,
     reabastecer_suplemento,
     registrar_dose_creatina,
@@ -27,12 +31,15 @@ from views.routines_view import (
     DANGER_RED,
     DARK_BG,
     ORCELA_BLUE,
+    ORCELA_BORDER_GLOW,
+    ORCELA_BORDER_HIGHLIGHT,
     ORCELA_DARK_SURFACE,
     PURE_WHITE,
     SURFACE_BORDER,
     TEXT_MUTED,
     construir_borda_input,
     construir_logo_p4,
+    construir_sombra_orcela,
 )
 
 AMBER_WARN = "#FFA000"
@@ -48,9 +55,10 @@ def _formatar_label_data(data_ref: date) -> str:
 
 
 def build_nutrition_view(page: ft.Page) -> ft.Control:
-    """Constrói a view modular de Nutrição, Hidratação e Estoque Inteligente de Suplementos."""
+    """Constrói a view modular de Nutrição, Hidratação, Estoque e Lojas Favoritas."""
     data_selecionada: date = date.today()
     form_metas_visivel: bool = False
+    form_lojas_visivel: bool = False
     form_novo_item_visivel: bool = False
     form_novo_suplemento_visivel: bool = False
 
@@ -71,6 +79,46 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
                 bgcolor=DANGER_RED if erro else ORCELA_BLUE,
             )
         )
+
+    url_launcher = ft.UrlLauncher()
+
+    def abrir_url_loja(url: str) -> None:
+        """Garante prefixo https:// e abre a URL via UrlLauncher assíncrono do Flet 1.1.2 com fallback webbrowser."""
+        url_limpa = (url or "").strip()
+        if not url_limpa:
+            notificar("URL da loja inválida.", erro=True)
+            return
+        if not (
+            url_limpa.startswith("http://") or url_limpa.startswith("https://")
+        ):
+            url_limpa = f"https://{url_limpa}"
+
+        async def _disparar_url() -> None:
+            try:
+                await url_launcher.launch_url(url_limpa)
+            except Exception:
+                try:
+                    webbrowser.open(url_limpa)
+                except Exception as exc:
+                    notificar(f"Erro ao abrir link: {exc}", erro=True)
+
+        try:
+            if hasattr(page, "run_task"):
+                page.run_task(_disparar_url)
+            else:
+                webbrowser.open(url_limpa)
+        except Exception:
+            try:
+                webbrowser.open(url_limpa)
+            except Exception as exc:
+                notificar(f"Não foi possível abrir o site: {exc}", erro=True)
+
+    def criar_handler_abrir_url(url_destino: str) -> Callable[[Any], None]:
+        """Evita closures em loops for capturando url_destino no escopo dedicado."""
+        def _handler(_: Any = None) -> None:
+            abrir_url_loja(url_destino)
+
+        return _handler
 
     tf_meta_prot = ft.TextField(
         label="Meta Proteína (g)",
@@ -95,6 +143,22 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
         color=PURE_WHITE,
         text_size=13,
         width=110,
+    )
+
+    # Controles do modal de Lojas Favoritas
+    tf_loja_nome = ft.TextField(
+        label="Nome da Loja (ex: Oficial Farma)",
+        border=construir_borda_input(),
+        color=PURE_WHITE,
+        text_size=13,
+        expand=True,
+    )
+    tf_loja_url = ft.TextField(
+        label="Link / Domínio (ex: gsuplementos.com.br)",
+        border=construir_borda_input(),
+        color=PURE_WHITE,
+        text_size=13,
+        expand=True,
     )
 
     tf_item_titulo = ft.TextField(
@@ -160,6 +224,12 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
         text_size=13,
         width=90,
     )
+    dd_sup_loja = ft.Dropdown(
+        label="Loja Preferencial de Reposição",
+        border=construir_borda_input(),
+        color=PURE_WHITE,
+        expand=True,
+    )
 
     def mudar_dia(delta_dias: int) -> None:
         nonlocal data_selecionada
@@ -175,6 +245,29 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
             tf_meta_prot.value = f"{meta_atual.meta_proteina_g:g}"
             tf_meta_agua.value = str(meta_atual.meta_agua_ml)
             tf_meta_creatina.value = str(meta_atual.doses_creatina_alvo)
+        renderizar(atualizar_pagina=True)
+
+    def alternar_form_lojas(_: Any = None) -> None:
+        nonlocal form_lojas_visivel
+        form_lojas_visivel = not form_lojas_visivel
+        renderizar(atualizar_pagina=True)
+
+    def salvar_nova_loja(_: Any = None) -> None:
+        try:
+            nova = criar_loja_suplemento(
+                nome=tf_loja_nome.value or "",
+                url=tf_loja_url.value or "",
+            )
+            tf_loja_nome.value = ""
+            tf_loja_url.value = ""
+            notificar(f"Loja '{nova.nome}' salva com sucesso!")
+            renderizar(atualizar_pagina=True)
+        except Exception as exc:
+            notificar(str(exc), erro=True)
+
+    def remover_loja(loja_id: int, nome_loja: str) -> None:
+        excluir_loja_suplemento(loja_id)
+        notificar(f"Loja '{nome_loja}' removida.")
         renderizar(atualizar_pagina=True)
 
     def salvar_metas(_: Any = None) -> None:
@@ -222,11 +315,13 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
         try:
             qtd_tot = float((tf_sup_total.value or "60").replace(",", "."))
             uso_dia = float((tf_sup_consumo.value or "1").replace(",", "."))
+            lid = int(dd_sup_loja.value) if dd_sup_loja.value else None
             novo = criar_suplemento_estoque(
                 nome=tf_sup_nome.value or "",
                 unidade=dd_sup_unidade.value or "doses",
                 quantidade_total=qtd_tot,
                 consumo_diario_padrao=uso_dia,
+                loja_id=lid,
             )
             tf_sup_nome.value = ""
             form_novo_suplemento_visivel = False
@@ -267,6 +362,21 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
         proteina_ingerida: float = dados_dia["proteina_ingerida_g"]
         meta: MetaNutricional = dados_dia["meta"]
         estoque_lista = listar_estoque_suplementos()
+        lojas_cadastradas = listar_lojas_suplementos()
+
+        dd_sup_loja.options = [
+            ft.dropdown.Option(key="0", text="Sem loja vinculada"),
+            *[
+                ft.dropdown.Option(key=str(lj.id), text=lj.nome)
+                for lj in lojas_cadastradas
+            ],
+        ]
+        if not dd_sup_loja.value:
+            loja_growth = next(
+                (lj for lj in lojas_cadastradas if "growth" in lj.nome.lower()),
+                lojas_cadastradas[0] if lojas_cadastradas else None,
+            )
+            dd_sup_loja.value = str(loja_growth.id) if loja_growth else "0"
 
         prop_proteina = min(
             1.0,
@@ -339,11 +449,133 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
             )
         ]
 
+        # Modal / Painel de Lojas Favoritas
+        if form_lojas_visivel:
+            linhas_lojas: list[ft.Control] = []
+            for lj in lojas_cadastradas:
+                linhas_lojas.append(
+                    ft.Container(
+                        bgcolor=DARK_BG,
+                        border=ft.Border.all(1, ORCELA_BORDER_GLOW),
+                        border_radius=8,
+                        padding=ft.Padding.symmetric(horizontal=10, vertical=6),
+                        content=ft.Row(
+                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            controls=[
+                                ft.Column(
+                                    spacing=2,
+                                    expand=True,
+                                    controls=[
+                                        ft.Text(
+                                            lj.nome,
+                                            size=13,
+                                            weight=ft.FontWeight.BOLD,
+                                            color=PURE_WHITE,
+                                        ),
+                                        ft.Text(
+                                            lj.url,
+                                            size=11,
+                                            color=ORCELA_BLUE,
+                                        ),
+                                    ],
+                                ),
+                                ft.Row(
+                                    spacing=4,
+                                    controls=[
+                                        ft.IconButton(
+                                            icon=ft.Icons.OPEN_IN_NEW_ROUNDED,
+                                            icon_color=ORCELA_BLUE,
+                                            tooltip=f"Abrir {lj.nome}",
+                                            on_click=criar_handler_abrir_url(lj.url),
+                                        ),
+                                        ft.IconButton(
+                                            icon=ft.Icons.DELETE_OUTLINE_ROUNDED,
+                                            icon_color=DANGER_RED,
+                                            tooltip="Remover loja",
+                                            on_click=lambda _, lid=lj.id, lnome=lj.nome: remover_loja(
+                                                lid, lnome
+                                            ),
+                                        ),
+                                    ],
+                                ),
+                            ],
+                        ),
+                    )
+                )
+
+            controles.append(
+                ft.Container(
+                    bgcolor=CARD_BG,
+                    border=ft.Border.all(1, ORCELA_BORDER_HIGHLIGHT),
+                    shadow=construir_sombra_orcela(),
+                    border_radius=12,
+                    padding=14,
+                    content=ft.Column(
+                        spacing=10,
+                        controls=[
+                            ft.Row(
+                                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                                controls=[
+                                    ft.Row(
+                                        spacing=6,
+                                        expand=True,
+                                        controls=[
+                                            ft.Icon(
+                                                ft.Icons.STOREFRONT_ROUNDED,
+                                                color=ORCELA_BLUE,
+                                                size=20,
+                                            ),
+                                            ft.Text(
+                                                "Lojas Favoritas de Suplementos",
+                                                size=15,
+                                                weight=ft.FontWeight.BOLD,
+                                                color=PURE_WHITE,
+                                                expand=True,
+                                            ),
+                                        ],
+                                    ),
+                                    ft.IconButton(
+                                        icon=ft.Icons.CLOSE_ROUNDED,
+                                        icon_color=TEXT_MUTED,
+                                        on_click=alternar_form_lojas,
+                                    ),
+                                ],
+                            ),
+                            ft.Column(spacing=6, controls=linhas_lojas),
+                            ft.Divider(height=1, color=SURFACE_BORDER),
+                            ft.Text(
+                                "Adicionar Nova Loja",
+                                size=12,
+                                weight=ft.FontWeight.BOLD,
+                                color=ORCELA_BLUE,
+                            ),
+                            ft.Row(
+                                spacing=8,
+                                controls=[tf_loja_nome, tf_loja_url],
+                            ),
+                            ft.Button(
+                                content="SALVAR LOJA",
+                                icon=ft.Icons.ADD_LINK_ROUNDED,
+                                bgcolor=ORCELA_BLUE,
+                                color=PURE_WHITE,
+                                width=float("inf"),
+                                style=ft.ButtonStyle(
+                                    shape=ft.RoundedRectangleBorder(radius=10),
+                                ),
+                                on_click=salvar_nova_loja,
+                            ),
+                        ],
+                    ),
+                )
+            )
+
         if form_metas_visivel:
             controles.append(
                 ft.Container(
                     bgcolor=CARD_BG,
-                    border=ft.Border.all(1, ORCELA_BLUE),
+                    border=ft.Border.all(1, ORCELA_BORDER_HIGHLIGHT),
+                    shadow=construir_sombra_orcela(),
                     border_radius=12,
                     padding=14,
                     content=ft.Column(
@@ -357,6 +589,7 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
                                         size=15,
                                         weight=ft.FontWeight.BOLD,
                                         color=PURE_WHITE,
+                                        expand=True,
                                     ),
                                     ft.IconButton(
                                         icon=ft.Icons.CLOSE_ROUNDED,
@@ -388,7 +621,8 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
         controles.append(
             ft.Container(
                 bgcolor=CARD_BG,
-                border=ft.Border.all(1, SURFACE_BORDER),
+                border=ft.Border.all(1, ORCELA_BORDER_HIGHLIGHT),
+                shadow=construir_sombra_orcela(),
                 border_radius=14,
                 padding=16,
                 content=ft.Column(
@@ -396,19 +630,36 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
                     controls=[
                         ft.Row(
                             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
                             controls=[
                                 ft.Text(
                                     "METAS & PROGRESSO DIÁRIO",
                                     size=12,
                                     weight=ft.FontWeight.BOLD,
                                     color=TEXT_MUTED,
+                                    expand=True,
                                 ),
-                                ft.IconButton(
-                                    icon=ft.Icons.SETTINGS_OUTLINED,
-                                    icon_color=ORCELA_BLUE,
-                                    icon_size=20,
-                                    tooltip="Editar metas",
-                                    on_click=lambda _: alternar_form_metas(meta),
+                                ft.Row(
+                                    spacing=4,
+                                    controls=[
+                                        ft.IconButton(
+                                            icon=ft.Icons.STOREFRONT_ROUNDED,
+                                            icon_color=ORCELA_BLUE,
+                                            bgcolor=ORCELA_DARK_SURFACE,
+                                            icon_size=20,
+                                            tooltip="Lojas Favoritas",
+                                            on_click=alternar_form_lojas,
+                                        ),
+                                        ft.IconButton(
+                                            icon=ft.Icons.SETTINGS_OUTLINED,
+                                            icon_color=ORCELA_BLUE,
+                                            icon_size=20,
+                                            tooltip="Editar metas",
+                                            on_click=lambda _: alternar_form_metas(
+                                                meta
+                                            ),
+                                        ),
+                                    ],
                                 ),
                             ],
                         ),
@@ -457,7 +708,8 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
                                     value=prop_proteina,
                                     color=ORCELA_BLUE,
                                     bgcolor=SURFACE_BORDER,
-                                    height=8,
+                                    bar_height=10,
+                                    border_radius=ft.BorderRadius.all(10),
                                 ),
                             ],
                         ),
@@ -496,7 +748,8 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
                                     value=prop_agua,
                                     color=ORCELA_BLUE,
                                     bgcolor=SURFACE_BORDER,
-                                    height=8,
+                                    bar_height=10,
+                                    border_radius=ft.BorderRadius.all(10),
                                 ),
                                 ft.Row(
                                     spacing=8,
@@ -572,7 +825,8 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
                                     value=prop_creatina,
                                     color=ORCELA_BLUE,
                                     bgcolor=SURFACE_BORDER,
-                                    height=8,
+                                    bar_height=10,
+                                    border_radius=ft.BorderRadius.all(10),
                                 ),
                             ],
                         ),
@@ -596,7 +850,7 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
                         expand=True,
                     ),
                     ft.OutlinedButton(
-                        content="+ Suplemento",
+                        content="Novo Suplemento",
                         icon=ft.Icons.ADD_ROUNDED,
                         style=ft.ButtonStyle(
                             padding=ft.Padding.symmetric(horizontal=10, vertical=6),
@@ -611,7 +865,8 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
             controles.append(
                 ft.Container(
                     bgcolor=CARD_BG,
-                    border=ft.Border.all(1, ORCELA_BLUE),
+                    border=ft.Border.all(1, ORCELA_BORDER_HIGHLIGHT),
+                    shadow=construir_sombra_orcela(),
                     border_radius=12,
                     padding=14,
                     content=ft.Column(
@@ -625,6 +880,7 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
                                         size=15,
                                         weight=ft.FontWeight.BOLD,
                                         color=PURE_WHITE,
+                                        expand=True,
                                     ),
                                     ft.IconButton(
                                         icon=ft.Icons.CLOSE_ROUNDED,
@@ -642,6 +898,7 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
                                     tf_sup_consumo,
                                 ],
                             ),
+                            ft.Row(controls=[dd_sup_loja]),
                             ft.Button(
                                 content="SALVAR NO ESTOQUE",
                                 icon=ft.Icons.CHECK_ROUNDED,
@@ -664,6 +921,8 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
             prop_sup: float = info_sup["proporcao"]
             dias_rest: int = info_sup["dias_restantes"]
             status: str = info_sup["status_alerta"]
+            loja_nome: str | None = info_sup["loja_nome"]
+            loja_url: str | None = info_sup["loja_url"]
 
             if status == "CRITICO":
                 cor_barra = DANGER_RED
@@ -678,92 +937,110 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
                 texto_badge = f"~{dias_rest} dias"
                 bg_badge = ORCELA_DARK_SURFACE
 
+            subtitulo_loja = f" • Loja: {loja_nome}" if loja_nome else ""
+
+            controles_card_sup: list[ft.Control] = [
+                ft.Row(
+                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    controls=[
+                        ft.Column(
+                            spacing=2,
+                            expand=True,
+                            controls=[
+                                ft.Text(
+                                    sup.nome,
+                                    size=14,
+                                    weight=ft.FontWeight.BOLD,
+                                    color=PURE_WHITE,
+                                ),
+                                ft.Text(
+                                    f"Restam {sup.quantidade_atual:g} / {sup.quantidade_total:g} {sup.unidade} ({perc:.0f}%) • ~{dias_rest} dias{subtitulo_loja}",
+                                    size=11,
+                                    color=TEXT_MUTED,
+                                ),
+                            ],
+                        ),
+                        ft.Container(
+                            bgcolor=bg_badge,
+                            padding=ft.Padding.symmetric(
+                                horizontal=8, vertical=4
+                            ),
+                            border_radius=6,
+                            content=ft.Text(
+                                texto_badge,
+                                size=10,
+                                weight=ft.FontWeight.BOLD,
+                                color=cor_barra
+                                if status != "OK"
+                                else PURE_WHITE,
+                            ),
+                        ),
+                    ],
+                ),
+                ft.ProgressBar(
+                    value=prop_sup,
+                    color=cor_barra,
+                    bgcolor=SURFACE_BORDER,
+                    bar_height=10,
+                    border_radius=ft.BorderRadius.all(10),
+                ),
+                ft.Row(
+                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    controls=[
+                        ft.Text(
+                            f"Uso diário: {sup.consumo_diario_padrao:g} {sup.unidade}/dia",
+                            size=11,
+                            color=TEXT_MUTED,
+                        ),
+                        ft.Row(
+                            spacing=6,
+                            controls=[
+                                ft.OutlinedButton(
+                                    content="-1 Dose",
+                                    on_click=lambda _, sid=sup.id: acao_consumir_estoque(
+                                        sid
+                                    ),
+                                ),
+                                ft.IconButton(
+                                    icon=ft.Icons.REFRESH_ROUNDED,
+                                    icon_color=ORCELA_BLUE,
+                                    bgcolor=ORCELA_DARK_SURFACE,
+                                    tooltip="Reabastecer pote (100%)",
+                                    on_click=lambda _, sid=sup.id, snome=sup.nome: acao_reabastecer_estoque(
+                                        sid, snome
+                                    ),
+                                ),
+                            ],
+                        ),
+                    ],
+                ),
+            ]
+
+            if status in {"BAIXO", "CRITICO"} and loja_nome and loja_url:
+                controles_card_sup.append(
+                    ft.Button(
+                        content=f"Comprar na {loja_nome}",
+                        icon=ft.Icons.OPEN_IN_NEW_ROUNDED,
+                        bgcolor=ORCELA_BLUE,
+                        color=PURE_WHITE,
+                        width=float("inf"),
+                        style=ft.ButtonStyle(
+                            shape=ft.RoundedRectangleBorder(radius=8),
+                        ),
+                        on_click=criar_handler_abrir_url(loja_url),
+                    )
+                )
+
             controles.append(
                 ft.Container(
                     bgcolor=CARD_BG,
                     border=ft.Border.all(
-                        1, cor_barra if status != "OK" else SURFACE_BORDER
+                        1, cor_barra if status != "OK" else ORCELA_BORDER_GLOW
                     ),
+                    shadow=construir_sombra_orcela(),
                     border_radius=12,
                     padding=14,
-                    content=ft.Column(
-                        spacing=8,
-                        controls=[
-                            ft.Row(
-                                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                                controls=[
-                                    ft.Column(
-                                        spacing=2,
-                                        expand=True,
-                                        controls=[
-                                            ft.Text(
-                                                sup.nome,
-                                                size=14,
-                                                weight=ft.FontWeight.BOLD,
-                                                color=PURE_WHITE,
-                                            ),
-                                            ft.Text(
-                                                f"Restam {sup.quantidade_atual:g} / {sup.quantidade_total:g} {sup.unidade} ({perc:.0f}%) • ~{dias_rest} dias",
-                                                size=11,
-                                                color=TEXT_MUTED,
-                                            ),
-                                        ],
-                                    ),
-                                    ft.Container(
-                                        bgcolor=bg_badge,
-                                        padding=ft.Padding.symmetric(
-                                            horizontal=8, vertical=4
-                                        ),
-                                        border_radius=6,
-                                        content=ft.Text(
-                                            texto_badge,
-                                            size=10,
-                                            weight=ft.FontWeight.BOLD,
-                                            color=cor_barra
-                                            if status != "OK"
-                                            else PURE_WHITE,
-                                        ),
-                                    ),
-                                ],
-                            ),
-                            ft.ProgressBar(
-                                value=prop_sup,
-                                color=cor_barra,
-                                bgcolor=SURFACE_BORDER,
-                                height=8,
-                            ),
-                            ft.Row(
-                                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                                controls=[
-                                    ft.Text(
-                                        f"Uso diário: {sup.consumo_diario_padrao:g} {sup.unidade}/dia",
-                                        size=11,
-                                        color=TEXT_MUTED,
-                                    ),
-                                    ft.Row(
-                                        spacing=6,
-                                        controls=[
-                                            ft.OutlinedButton(
-                                                content="-1 Dose",
-                                                on_click=lambda _, sid=sup.id: acao_consumir_estoque(
-                                                    sid
-                                                ),
-                                            ),
-                                            ft.IconButton(
-                                                icon=ft.Icons.REFRESH_ROUNDED,
-                                                icon_color=ORCELA_BLUE,
-                                                bgcolor=ORCELA_DARK_SURFACE,
-                                                tooltip="Reabastecer pote (100%)",
-                                                on_click=lambda _, sid=sup.id, snome=sup.nome: acao_reabastecer_estoque(
-                                                    sid, snome
-                                                ),
-                                            ),
-                                        ],
-                                    ),
-                                ],
-                            ),
-                        ],
-                    ),
+                    content=ft.Column(spacing=8, controls=controles_card_sup),
                 )
             )
 
@@ -782,7 +1059,7 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
                         expand=True,
                     ),
                     ft.OutlinedButton(
-                        content="+ Novo Item",
+                        content="Novo Item",
                         icon=ft.Icons.ADD_ROUNDED,
                         style=ft.ButtonStyle(
                             padding=ft.Padding.symmetric(horizontal=10, vertical=6),
@@ -797,7 +1074,8 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
             controles.append(
                 ft.Container(
                     bgcolor=CARD_BG,
-                    border=ft.Border.all(1, ORCELA_BLUE),
+                    border=ft.Border.all(1, ORCELA_BORDER_HIGHLIGHT),
+                    shadow=construir_sombra_orcela(),
                     border_radius=12,
                     padding=14,
                     content=ft.Column(
@@ -811,6 +1089,7 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
                                         size=15,
                                         weight=ft.FontWeight.BOLD,
                                         color=PURE_WHITE,
+                                        expand=True,
                                     ),
                                     ft.IconButton(
                                         icon=ft.Icons.CLOSE_ROUNDED,
@@ -853,8 +1132,9 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
                 ft.Container(
                     bgcolor=ORCELA_DARK_SURFACE if marcado else CARD_BG,
                     border=ft.Border.all(
-                        1, ORCELA_BLUE if marcado else SURFACE_BORDER
+                        1, ORCELA_BLUE if marcado else ORCELA_BORDER_GLOW
                     ),
+                    shadow=construir_sombra_orcela(),
                     border_radius=12,
                     padding=ft.Padding.symmetric(horizontal=12, vertical=10),
                     content=ft.Row(

@@ -17,12 +17,15 @@ from views.routines_view import (
     DARK_BG,
     GRUPOS_MUSCULARES,
     ORCELA_BLUE,
+    ORCELA_BORDER_GLOW,
+    ORCELA_BORDER_HIGHLIGHT,
     ORCELA_DARK_SURFACE,
     PURE_WHITE,
     SURFACE_BORDER,
     TEXT_MUTED,
     construir_borda_input,
     construir_logo_p4,
+    construir_sombra_orcela,
 )
 
 
@@ -126,7 +129,7 @@ def _construir_grafico_linha_evolucao(
 
     return ft.Container(
         bgcolor=DARK_BG,
-        border=ft.Border.all(1, SURFACE_BORDER),
+        border=ft.Border.all(1, ORCELA_BORDER_GLOW),
         border_radius=10,
         padding=12,
         content=ft.Column(
@@ -230,7 +233,7 @@ def _construir_grafico_linha_peso(
 
     return ft.Container(
         bgcolor=DARK_BG,
-        border=ft.Border.all(1, SURFACE_BORDER),
+        border=ft.Border.all(1, ORCELA_BORDER_GLOW),
         border_radius=10,
         padding=12,
         content=ft.Column(
@@ -399,7 +402,8 @@ def build_stats_view(page: ft.Page) -> ft.Control:
         return ft.Container(
             expand=True,
             bgcolor=CARD_BG,
-            border=ft.Border.all(1, SURFACE_BORDER),
+            border=ft.Border.all(1, ORCELA_BORDER_GLOW),
+            shadow=construir_sombra_orcela(),
             border_radius=12,
             padding=12,
             content=ft.Column(
@@ -516,7 +520,8 @@ def build_stats_view(page: ft.Page) -> ft.Control:
                             value=proporcao,
                             color=ORCELA_BLUE,
                             bgcolor=SURFACE_BORDER,
-                            height=7,
+                            bar_height=10,
+                            border_radius=ft.BorderRadius.all(10),
                         ),
                     ],
                 )
@@ -772,14 +777,16 @@ def build_stats_view(page: ft.Page) -> ft.Control:
             ),
             ft.Container(
                 bgcolor=CARD_BG,
-                border=ft.Border.all(1, SURFACE_BORDER),
+                border=ft.Border.all(1, ORCELA_BORDER_HIGHLIGHT),
+                shadow=construir_sombra_orcela(),
                 border_radius=14,
                 padding=16,
                 content=ft.Column(spacing=12, controls=controles_biometria),
             ),
             ft.Container(
                 bgcolor=CARD_BG,
-                border=ft.Border.all(1, SURFACE_BORDER),
+                border=ft.Border.all(1, ORCELA_BORDER_GLOW),
+                shadow=construir_sombra_orcela(),
                 border_radius=14,
                 padding=16,
                 content=ft.Column(
@@ -847,7 +854,8 @@ def build_stats_view(page: ft.Page) -> ft.Control:
             ),
             ft.Container(
                 bgcolor=CARD_BG,
-                border=ft.Border.all(1, SURFACE_BORDER),
+                border=ft.Border.all(1, ORCELA_BORDER_GLOW),
+                shadow=construir_sombra_orcela(),
                 border_radius=14,
                 padding=16,
                 content=ft.Column(

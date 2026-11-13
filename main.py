@@ -1,6 +1,7 @@
 import flet as ft
 
 from core.seed import init_db
+from views.cardio_view import build_cardio_view
 from views.nutrition_view import build_nutrition_view
 from views.routines_view import (
     CARD_BG,
@@ -38,8 +39,10 @@ def main(page: ft.Page) -> None:
         if indice == 0:
             conteudo_principal.content = build_train_view(page)
         elif indice == 1:
-            conteudo_principal.content = build_routines_view(page)
+            conteudo_principal.content = build_cardio_view(page)
         elif indice == 2:
+            conteudo_principal.content = build_routines_view(page)
+        elif indice == 3:
             conteudo_principal.content = build_stats_view(page)
         else:
             conteudo_principal.content = build_nutrition_view(page)
@@ -55,6 +58,11 @@ def main(page: ft.Page) -> None:
                 icon=ft.Icons.FITNESS_CENTER_OUTLINED,
                 selected_icon=ft.Icons.FITNESS_CENTER,
                 label="Treinar",
+            ),
+            ft.NavigationBarDestination(
+                icon=ft.Icons.DIRECTIONS_RUN_OUTLINED,
+                selected_icon=ft.Icons.DIRECTIONS_RUN,
+                label="Cardio",
             ),
             ft.NavigationBarDestination(
                 icon=ft.Icons.LIST_ALT_OUTLINED,

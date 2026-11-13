@@ -4,6 +4,7 @@ from typing import Any
 from sqlalchemy import desc, func, select
 
 from core.database import get_db_session
+from models.cardio_models import SessaoCardio
 from models.nutrition_models import RegistroBiometria
 from models.workout_models import Exercicio, SerieExecutada, SessaoTreino
 
@@ -84,6 +85,24 @@ def obter_metricas_gerais() -> dict[str, Any]:
                 .limit(1)
             )
 
+        data_corte_30d = datetime.now() - timedelta(days=30)
+        cardio_sessoes_30d = (
+            session.scalar(
+                select(func.count(SessaoCardio.id)).where(
+                    SessaoCardio.data >= data_corte_30d
+                )
+            )
+            or 0
+        )
+        cardio_km_30d = (
+            session.scalar(
+                select(func.coalesce(func.sum(SessaoCardio.distancia_km), 0.0)).where(
+                    SessaoCardio.data >= data_corte_30d
+                )
+            )
+            or 0.0
+        )
+
         return {
             "total_sessoes": int(total_sessoes),
             "tonelagem_total_kg": round(float(tonelagem_total), 1),
@@ -91,6 +110,8 @@ def obter_metricas_gerais() -> dict[str, Any]:
             "ultimo_peso_corporal_kg": (
                 round(float(ultimo_peso), 1) if ultimo_peso is not None else None
             ),
+            "cardio_sessoes_30d": int(cardio_sessoes_30d),
+            "cardio_km_30d": round(float(cardio_km_30d), 2),
         }
 
 

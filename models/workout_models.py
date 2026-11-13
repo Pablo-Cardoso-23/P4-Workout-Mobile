@@ -104,6 +104,10 @@ class SessaoTreino(Base):
     data_fim: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     peso_corporal_kg: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     notas: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    duracao_segundos: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    fc_media: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    calorias_estimadas: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    percepcao_esforco: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     ficha: Mapped[Optional["Ficha"]] = relationship("Ficha", back_populates="sessoes")
     series: Mapped[list["SerieExecutada"]] = relationship(

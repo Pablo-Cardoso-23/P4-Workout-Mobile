@@ -1,11 +1,13 @@
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 
 from core.database import Base, engine, get_db_session
+from models.cardio_models import SessaoCardio
 from models.nutrition_models import (
     CheckItemDiario,
     ItemChecklistNutri,
+    LojaSuplemento,
     MetaNutricional,
     RegistroBiometria,
     RegistroDiarioNutri,
@@ -102,12 +104,61 @@ ESTOQUE_INICIAL: list[dict[str, Any]] = [
 ]
 
 
+LOJAS_INICIAIS: list[dict[str, str]] = [
+    {"nome": "Growth Supplements", "url": "https://www.gsuplementos.com.br"},
+    {"nome": "Max Titanium", "url": "https://www.maxtitanium.com.br"},
+    {"nome": "Integralmedica", "url": "https://www.integralmedica.com.br"},
+    {"nome": "Dark Lab", "url": "https://www.darklabsuplementos.com.br"},
+]
+
+
 def init_db() -> None:
     """Cria as tabelas do banco SQLite e popula o catálogo de treino, nutrição, biometria e estoque."""
-    _ = (RegistroDiarioNutri, CheckItemDiario, RegistroBiometria, SuplementoEstoque)
+    _ = (
+        RegistroDiarioNutri,
+        CheckItemDiario,
+        RegistroBiometria,
+        LojaSuplemento,
+        SuplementoEstoque,
+        SessaoCardio,
+    )
     Base.metadata.create_all(bind=engine)
 
     with get_db_session() as session:
+        colunas_atuais = {
+            str(row[1])
+            for row in session.execute(
+                text("PRAGMA table_info(sessoes_treino)")
+            ).all()
+        }
+        novas_colunas = [
+            ("duracao_segundos", "INTEGER"),
+            ("fc_media", "INTEGER"),
+            ("calorias_estimadas", "INTEGER"),
+            ("percepcao_esforco", "INTEGER"),
+        ]
+        for col_nome, col_tipo in novas_colunas:
+            if col_nome not in colunas_atuais:
+                session.execute(
+                    text(
+                        f"ALTER TABLE sessoes_treino ADD COLUMN {col_nome} {col_tipo}"
+                    )
+                )
+
+        colunas_estoque = {
+            str(row[1])
+            for row in session.execute(
+                text("PRAGMA table_info(suplementos_estoque)")
+            ).all()
+        }
+        if "loja_id" not in colunas_estoque:
+            session.execute(
+                text(
+                    "ALTER TABLE suplementos_estoque ADD COLUMN loja_id INTEGER "
+                    "REFERENCES lojas_suplementos(id) ON DELETE SET NULL"
+                )
+            )
+        session.flush()
         total_exercicios = session.scalar(select(func.count(Exercicio.id))) or 0
         if total_exercicios == 0:
             exercicios_map: dict[str, Exercicio] = {}
@@ -183,6 +234,23 @@ def init_db() -> None:
                 )
             )
 
+        total_lojas = session.scalar(select(func.count(LojaSuplemento.id))) or 0
+        if total_lojas == 0:
+            for lj in LOJAS_INICIAIS:
+                session.add(
+                    LojaSuplemento(
+                        nome=lj["nome"],
+                        url=lj["url"],
+                        ativa=True,
+                    )
+                )
+            session.flush()
+
+        loja_growth = session.scalar(
+            select(LojaSuplemento).where(LojaSuplemento.nome == "Growth Supplements")
+        )
+        growth_id = loja_growth.id if loja_growth is not None else None
+
         total_estoque = session.scalar(select(func.count(SuplementoEstoque.id))) or 0
         if total_estoque == 0:
             for sup in ESTOQUE_INICIAL:
@@ -195,5 +263,17 @@ def init_db() -> None:
                         consumo_diario_padrao=float(sup["consumo_diario_padrao"]),
                         alerta_minimo_percentual=float(sup["alerta_minimo_percentual"]),
                         ativo=True,
+                        loja_id=growth_id,
                     )
                 )
+        elif growth_id is not None:
+            suplementos_sem_loja = list(
+                session.scalars(
+                    select(SuplementoEstoque).where(
+                        SuplementoEstoque.loja_id.is_(None),
+                        SuplementoEstoque.nome.ilike("%Growth%"),
+                    )
+                ).all()
+            )
+            for sup_item in suplementos_sem_loja:
+                sup_item.loja_id = growth_id

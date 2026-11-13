@@ -8,10 +8,78 @@ from core.database import get_db_session
 from models.nutrition_models import (
     CheckItemDiario,
     ItemChecklistNutri,
+    LojaSuplemento,
     MetaNutricional,
     RegistroDiarioNutri,
     SuplementoEstoque,
 )
+
+
+def _normalizar_url(url_bruta: str) -> str:
+    limpa = url_bruta.strip()
+    if not limpa:
+        raise ValueError("Informe o link (URL) da loja.")
+    if not (limpa.startswith("http://") or limpa.startswith("https://")):
+        return f"https://{limpa}"
+    return limpa
+
+
+def listar_lojas_suplementos() -> list[LojaSuplemento]:
+    """Lista todas as lojas de suplementos ativas ordenadas por nome."""
+    with get_db_session() as session:
+        stmt = (
+            select(LojaSuplemento)
+            .where(LojaSuplemento.ativa.is_(True))
+            .order_by(LojaSuplemento.nome)
+        )
+        return list(session.scalars(stmt).all())
+
+
+def criar_loja_suplemento(nome: str, url: str) -> LojaSuplemento:
+    """Cria uma nova loja favorita normalizando a URL com https://."""
+    nome_limpo = nome.strip()
+    if not nome_limpo:
+        raise ValueError("Informe o nome da loja.")
+    url_normalizada = _normalizar_url(url)
+
+    with get_db_session() as session:
+        existente = session.scalar(
+            select(LojaSuplemento).where(
+                func.lower(LojaSuplemento.nome) == nome_limpo.lower()
+            )
+        )
+        if existente is not None:
+            existente.url = url_normalizada
+            existente.ativa = True
+            session.flush()
+            return existente
+
+        nova = LojaSuplemento(
+            nome=nome_limpo,
+            url=url_normalizada,
+            ativa=True,
+        )
+        session.add(nova)
+        session.flush()
+        return nova
+
+
+def excluir_loja_suplemento(loja_id: int) -> None:
+    """Remove uma loja do catálogo de lojas favoritas."""
+    with get_db_session() as session:
+        loja = session.get(LojaSuplemento, loja_id)
+        if loja is not None:
+            session.delete(loja)
+
+
+def vincular_loja_suplemento(suplemento_id: int, loja_id: int | None) -> None:
+    """Atualiza a loja preferencial vinculada a um suplemento do estoque."""
+    with get_db_session() as session:
+        sup = session.get(SuplementoEstoque, suplemento_id)
+        if sup is None:
+            raise ValueError(f"Suplemento #{suplemento_id} não encontrado.")
+        sup.loja_id = int(loja_id) if (loja_id is not None and loja_id > 0) else None
+        session.flush()
 
 
 def _garantir_registro_e_checks(
@@ -144,7 +212,9 @@ def adicionar_proteina_avulsa(data_alvo: date, gramas: float) -> float:
     """Soma gramas em proteina_extra_g (nunca abaixo de 0)."""
     with get_db_session() as session:
         registro, _ = _garantir_registro_e_checks(session, data_alvo)
-        novo_valor = max(0.0, round(float(registro.proteina_extra_g) + float(gramas), 1))
+        novo_valor = max(
+            0.0, round(float(registro.proteina_extra_g) + float(gramas), 1)
+        )
         registro.proteina_extra_g = novo_valor
         session.flush()
         return novo_valor
@@ -196,7 +266,7 @@ def atualizar_metas(
 
 
 def listar_estoque_suplementos() -> list[dict[str, Any]]:
-    """Retorna os suplementos ativos com percentual restante, dias restantes e alerta."""
+    """Retorna os suplementos ativos com percentual, dias restantes, alerta e loja vinculada."""
     with get_db_session() as session:
         stmt = (
             select(SuplementoEstoque)
@@ -216,11 +286,15 @@ def listar_estoque_suplementos() -> list[dict[str, Any]]:
 
             if percentual <= 5.0 or dias_restantes <= 3:
                 status_alerta = "CRITICO"
-            elif percentual <= float(sup.alerta_minimo_percentual) or dias_restantes <= 7:
+            elif (
+                percentual <= float(sup.alerta_minimo_percentual)
+                or dias_restantes <= 7
+            ):
                 status_alerta = "BAIXO"
             else:
                 status_alerta = "OK"
 
+            loja_obj = sup.loja
             resultado.append(
                 {
                     "suplemento": sup,
@@ -228,6 +302,9 @@ def listar_estoque_suplementos() -> list[dict[str, Any]]:
                     "proporcao": min(1.0, max(0.0, atual / total)),
                     "dias_restantes": dias_restantes,
                     "status_alerta": status_alerta,
+                    "loja_id": sup.loja_id,
+                    "loja_nome": loja_obj.nome if loja_obj is not None else None,
+                    "loja_url": loja_obj.url if loja_obj is not None else None,
                 }
             )
         return resultado
@@ -246,7 +323,9 @@ def consumir_suplemento(
             if quantidade is not None
             else float(sup.consumo_diario_padrao)
         )
-        sup.quantidade_atual = max(0.0, round(float(sup.quantidade_atual) - desconto, 1))
+        sup.quantidade_atual = max(
+            0.0, round(float(sup.quantidade_atual) - desconto, 1)
+        )
         session.flush()
 
 
@@ -274,8 +353,9 @@ def criar_suplemento_estoque(
     unidade: str,
     quantidade_total: float,
     consumo_diario_padrao: float,
+    loja_id: int | None = None,
 ) -> SuplementoEstoque:
-    """Cadastra um novo pote de suplemento no controle de estoque."""
+    """Cadastra um novo pote de suplemento no controle de estoque vinculado a uma loja."""
     nome_limpo = nome.strip()
     if not nome_limpo:
         raise ValueError("Informe o nome do suplemento.")
@@ -301,6 +381,7 @@ def criar_suplemento_estoque(
             consumo_diario_padrao=consumo,
             alerta_minimo_percentual=20.0,
             ativo=True,
+            loja_id=int(loja_id) if (loja_id is not None and loja_id > 0) else None,
         )
         session.add(novo)
         session.flush()
