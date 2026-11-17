@@ -8,6 +8,7 @@ from services.workout_service import (
     excluir_ficha,
     listar_exercicios,
     listar_fichas,
+    mover_exercicio_ficha,
 )
 
 ORCELA_BLUE = "#007BFF"
@@ -245,6 +246,25 @@ def build_routines_view(page: ft.Page) -> ft.Control:
                 item["ordem"] = idx
             renderizar()
 
+    def mover_item_rascunho(indice: int, direcao: str) -> None:
+        if direcao == "subir" and indice > 0:
+            itens_rascunho[indice - 1], itens_rascunho[indice] = (
+                itens_rascunho[indice],
+                itens_rascunho[indice - 1],
+            )
+        elif direcao == "descer" and indice < len(itens_rascunho) - 1:
+            itens_rascunho[indice + 1], itens_rascunho[indice] = (
+                itens_rascunho[indice],
+                itens_rascunho[indice + 1],
+            )
+        for idx, item in enumerate(itens_rascunho, start=1):
+            item["ordem"] = idx
+        renderizar()
+
+    def reordenar_exercicio_salvo(ficha_ex_id: int, direcao: str) -> None:
+        mover_exercicio_ficha(ficha_ex_id, direcao)
+        renderizar()
+
     def salvar_ficha_completa(_: Any = None) -> None:
         nonlocal form_ficha_visivel, form_exercicio_inline_visivel
         try:
@@ -366,25 +386,43 @@ def build_routines_view(page: ft.Page) -> ft.Control:
 
         if form_ficha_visivel:
             linhas_rascunho: list[ft.Control] = []
+            total_rascunho = len(itens_rascunho)
             for idx, item in enumerate(itens_rascunho):
+                eh_primeiro_r = idx == 0
+                eh_ultimo_r = idx == total_rascunho - 1
                 linhas_rascunho.append(
                     ft.Container(
                         bgcolor=DARK_BG,
                         border=ft.Border.all(1, ORCELA_BORDER_GLOW),
                         border_radius=8,
-                        padding=ft.Padding.symmetric(horizontal=10, vertical=6),
+                        padding=ft.Padding.symmetric(horizontal=8, vertical=6),
                         content=ft.Row(
                             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            spacing=4,
                             controls=[
                                 ft.Column(
                                     spacing=2,
                                     expand=True,
                                     controls=[
                                         ft.Text(
-                                            f"{item['ordem']}. {item['nome_exibicao']}",
                                             size=13,
-                                            weight=ft.FontWeight.BOLD,
-                                            color=PURE_WHITE,
+                                            spans=[
+                                                ft.TextSpan(
+                                                    f"{item['ordem']}. ",
+                                                    ft.TextStyle(
+                                                        color=ORCELA_BLUE,
+                                                        weight=ft.FontWeight.BOLD,
+                                                    ),
+                                                ),
+                                                ft.TextSpan(
+                                                    str(item["nome_exibicao"]),
+                                                    ft.TextStyle(
+                                                        color=PURE_WHITE,
+                                                        weight=ft.FontWeight.BOLD,
+                                                    ),
+                                                ),
+                                            ],
                                         ),
                                         ft.Text(
                                             f"{item['series_alvo']} séries x {item['reps_alvo']} reps • {item['descanso_segundos']}s descanso",
@@ -393,10 +431,48 @@ def build_routines_view(page: ft.Page) -> ft.Control:
                                         ),
                                     ],
                                 ),
-                                ft.IconButton(
-                                    icon=ft.Icons.DELETE_OUTLINE_ROUNDED,
-                                    icon_color=DANGER_RED,
-                                    on_click=lambda _, i=idx: remover_item_rascunho(i),
+                                ft.Row(
+                                    spacing=2,
+                                    controls=[
+                                        ft.IconButton(
+                                            icon=ft.Icons.KEYBOARD_ARROW_UP_ROUNDED,
+                                            icon_size=18,
+                                            width=30,
+                                            height=30,
+                                            disabled=eh_primeiro_r,
+                                            icon_color=SURFACE_BORDER
+                                            if eh_primeiro_r
+                                            else ORCELA_BLUE,
+                                            tooltip="Subir exercício",
+                                            on_click=lambda _, i=idx: mover_item_rascunho(
+                                                i, "subir"
+                                            ),
+                                        ),
+                                        ft.IconButton(
+                                            icon=ft.Icons.KEYBOARD_ARROW_DOWN_ROUNDED,
+                                            icon_size=18,
+                                            width=30,
+                                            height=30,
+                                            disabled=eh_ultimo_r,
+                                            icon_color=SURFACE_BORDER
+                                            if eh_ultimo_r
+                                            else ORCELA_BLUE,
+                                            tooltip="Descer exercício",
+                                            on_click=lambda _, i=idx: mover_item_rascunho(
+                                                i, "descer"
+                                            ),
+                                        ),
+                                        ft.IconButton(
+                                            icon=ft.Icons.DELETE_OUTLINE_ROUNDED,
+                                            icon_size=18,
+                                            width=30,
+                                            height=30,
+                                            icon_color=DANGER_RED,
+                                            on_click=lambda _, i=idx: remover_item_rascunho(
+                                                i
+                                            ),
+                                        ),
+                                    ],
                                 ),
                             ],
                         ),
@@ -523,31 +599,86 @@ def build_routines_view(page: ft.Page) -> ft.Control:
             )
         else:
             for ficha in fichas:
-                linhas_ex = [
-                    ft.Row(
-                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                        controls=[
-                            ft.Text(
-                                f"{item.ordem}. {item.exercicio.nome}",
-                                size=13,
-                                color=PURE_WHITE,
-                                expand=True,
-                            ),
-                            ft.Container(
-                                bgcolor=ORCELA_DARK_SURFACE,
-                                padding=ft.Padding.symmetric(horizontal=8, vertical=3),
-                                border_radius=6,
-                                content=ft.Text(
-                                    f"{item.series_alvo}x {item.reps_alvo} • {item.descanso_segundos}s",
-                                    size=11,
-                                    color=ORCELA_BLUE,
-                                    weight=ft.FontWeight.BOLD,
+                total_itens_ficha = len(ficha.itens)
+                linhas_ex: list[ft.Control] = []
+                for idx_it, item in enumerate(ficha.itens):
+                    eh_primeiro = idx_it == 0
+                    eh_ultimo = idx_it == total_itens_ficha - 1
+                    linhas_ex.append(
+                        ft.Row(
+                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            spacing=4,
+                            controls=[
+                                ft.Text(
+                                    size=13,
+                                    expand=True,
+                                    spans=[
+                                        ft.TextSpan(
+                                            f"{idx_it + 1}. ",
+                                            ft.TextStyle(
+                                                color=ORCELA_BLUE,
+                                                weight=ft.FontWeight.BOLD,
+                                            ),
+                                        ),
+                                        ft.TextSpan(
+                                            item.exercicio.nome,
+                                            ft.TextStyle(
+                                                color=PURE_WHITE,
+                                                weight=ft.FontWeight.W_500,
+                                            ),
+                                        ),
+                                    ],
                                 ),
-                            ),
-                        ],
+                                ft.Container(
+                                    bgcolor=ORCELA_DARK_SURFACE,
+                                    padding=ft.Padding.symmetric(
+                                        horizontal=7, vertical=3
+                                    ),
+                                    border_radius=6,
+                                    content=ft.Text(
+                                        f"{item.series_alvo}x {item.reps_alvo} • {item.descanso_segundos}s",
+                                        size=11,
+                                        color=ORCELA_BLUE,
+                                        weight=ft.FontWeight.BOLD,
+                                    ),
+                                ),
+                                ft.Row(
+                                    spacing=0,
+                                    controls=[
+                                        ft.IconButton(
+                                            icon=ft.Icons.KEYBOARD_ARROW_UP_ROUNDED,
+                                            icon_size=18,
+                                            width=30,
+                                            height=30,
+                                            disabled=eh_primeiro,
+                                            icon_color=SURFACE_BORDER
+                                            if eh_primeiro
+                                            else ORCELA_BLUE,
+                                            tooltip="Subir exercício",
+                                            on_click=lambda _, feid=item.id: reordenar_exercicio_salvo(
+                                                feid, "subir"
+                                            ),
+                                        ),
+                                        ft.IconButton(
+                                            icon=ft.Icons.KEYBOARD_ARROW_DOWN_ROUNDED,
+                                            icon_size=18,
+                                            width=30,
+                                            height=30,
+                                            disabled=eh_ultimo,
+                                            icon_color=SURFACE_BORDER
+                                            if eh_ultimo
+                                            else ORCELA_BLUE,
+                                            tooltip="Descer exercício",
+                                            on_click=lambda _, feid=item.id: reordenar_exercicio_salvo(
+                                                feid, "descer"
+                                            ),
+                                        ),
+                                    ],
+                                ),
+                            ],
+                        )
                     )
-                    for item in ficha.itens
-                ]
 
                 controles.append(
                     ft.Container(

@@ -25,6 +25,47 @@ def _formatar_duracao(segundos: int | None) -> str:
     return f"{mins} min"
 
 
+def _classificar_intensidade_sessao(
+    kcal_por_min: float,
+    fc_media: int | None,
+    percepcao_esforco: int | None,
+) -> str:
+    """Deriva o índice de intensidade combinando densidade calórica, FC média e RPE."""
+    score = 0.0
+    if kcal_por_min >= 9.0:
+        score += 3.0
+    elif kcal_por_min >= 7.0:
+        score += 2.0
+    elif kcal_por_min >= 5.0:
+        score += 1.0
+
+    if fc_media is not None and fc_media > 0:
+        if fc_media >= 155:
+            score += 3.0
+        elif fc_media >= 135:
+            score += 2.0
+        elif fc_media >= 115:
+            score += 1.0
+    else:
+        score += 1.5
+
+    rpe = percepcao_esforco if percepcao_esforco is not None else 7
+    if rpe >= 9:
+        score += 3.0
+    elif rpe >= 8:
+        score += 2.0
+    elif rpe >= 6:
+        score += 1.0
+
+    if score >= 7.5:
+        return "Extrema"
+    if score >= 5.5:
+        return "Alta"
+    if score >= 3.5:
+        return "Moderada"
+    return "Leve"
+
+
 def _obter_peso_referencia(session: Any, peso_sessao: float | None = None) -> float:
     if peso_sessao is not None and peso_sessao > 0:
         return float(peso_sessao)
@@ -162,6 +203,66 @@ def excluir_ficha(ficha_id: int) -> None:
             session.delete(ficha)
 
 
+def mover_exercicio_ficha(ficha_exercicio_id: int, direcao: str) -> None:
+    """Move um exercício para cima ('subir') ou para baixo ('descer') na ficha e reindexa 1..N."""
+    dir_limpa = direcao.strip().lower()
+    if dir_limpa not in {"subir", "descer"}:
+        raise ValueError("A direção deve ser 'subir' ou 'descer'.")
+
+    with get_db_session() as session:
+        alvo = session.get(FichaExercicio, ficha_exercicio_id)
+        if alvo is None:
+            raise ValueError(f"Item de ficha #{ficha_exercicio_id} não encontrado.")
+
+        stmt = (
+            select(FichaExercicio)
+            .where(FichaExercicio.ficha_id == alvo.ficha_id)
+            .order_by(FichaExercicio.ordem.asc(), FichaExercicio.id.asc())
+        )
+        itens = list(session.scalars(stmt).all())
+
+        # Normaliza índices sequenciais 1..N
+        indice_alvo = -1
+        for idx, item in enumerate(itens):
+            item.ordem = idx + 1
+            if item.id == ficha_exercicio_id:
+                indice_alvo = idx
+
+        if indice_alvo == -1:
+            return
+
+        if dir_limpa == "subir" and indice_alvo > 0:
+            vizinho = itens[indice_alvo - 1]
+            alvo.ordem, vizinho.ordem = vizinho.ordem, alvo.ordem
+        elif dir_limpa == "descer" and indice_alvo < len(itens) - 1:
+            vizinho = itens[indice_alvo + 1]
+            alvo.ordem, vizinho.ordem = vizinho.ordem, alvo.ordem
+
+        session.flush()
+
+
+def remover_exercicio_ficha(ficha_exercicio_id: int) -> None:
+    """Remove um exercício de uma ficha existente e reindexa a ordem dos restantes (1..N)."""
+    with get_db_session() as session:
+        alvo = session.get(FichaExercicio, ficha_exercicio_id)
+        if alvo is None:
+            return
+        fid = alvo.ficha_id
+        session.delete(alvo)
+        session.flush()
+
+        restantes = list(
+            session.scalars(
+                select(FichaExercicio)
+                .where(FichaExercicio.ficha_id == fid)
+                .order_by(FichaExercicio.ordem.asc(), FichaExercicio.id.asc())
+            ).all()
+        )
+        for idx, item in enumerate(restantes, start=1):
+            item.ordem = idx
+        session.flush()
+
+
 def obter_ultima_execucao_exercicio(exercicio_id: int) -> list[SerieExecutada]:
     """Retorna as séries da última sessão finalizada daquele exercício para Auto-fill."""
     with get_db_session() as session:
@@ -255,8 +356,9 @@ def finalizar_sessao(
     notas: str | None = None,
     fc_media: int | None = None,
     percepcao_esforco: int | None = None,
+    calorias_manuais: int | None = None,
 ) -> SessaoTreino:
-    """Encerra a sessão de treino calculando duração, calorias (6.0 METs), FC e RPE."""
+    """Encerra a sessão de treino calculando duração, calorias (manual ou 6.0 METs), FC e RPE."""
     with get_db_session() as session:
         sessao = session.get(SessaoTreino, sessao_id)
         if sessao is None:
@@ -269,9 +371,12 @@ def finalizar_sessao(
         )
         sessao.duracao_segundos = duracao_seg
 
-        peso_ref = _obter_peso_referencia(session, sessao.peso_corporal_kg)
-        horas = duracao_seg / 3600.0
-        sessao.calorias_estimadas = max(1, int(round(6.0 * peso_ref * horas)))
+        if calorias_manuais is not None and int(calorias_manuais) > 0:
+            sessao.calorias_estimadas = int(calorias_manuais)
+        else:
+            peso_ref = _obter_peso_referencia(session, sessao.peso_corporal_kg)
+            horas = duracao_seg / 3600.0
+            sessao.calorias_estimadas = max(1, int(round(6.0 * peso_ref * horas)))
 
         if fc_media is not None and fc_media > 0:
             sessao.fc_media = int(fc_media)
@@ -292,8 +397,9 @@ def registrar_treino_muscular_manual(
     percepcao_esforco: int = 8,
     notas: str | None = None,
     series_manuais: list[dict[str, Any]] | None = None,
+    calorias_manuais: int | None = None,
 ) -> SessaoTreino:
-    """Registra manualmente uma sessão de musculação já finalizada com duração, FC, RPE e séries."""
+    """Registra manualmente uma sessão de musculação já finalizada com duração, FC, RPE, calorias e séries."""
     if duracao_minutos <= 0:
         raise ValueError("A duração em minutos deve ser maior que zero.")
 
@@ -303,7 +409,10 @@ def registrar_treino_muscular_manual(
 
     with get_db_session() as session:
         peso_ref = _obter_peso_referencia(session)
-        calorias = max(1, int(round(6.0 * peso_ref * (duracao_seg / 3600.0))))
+        if calorias_manuais is not None and int(calorias_manuais) > 0:
+            calorias = int(calorias_manuais)
+        else:
+            calorias = max(1, int(round(6.0 * peso_ref * (duracao_seg / 3600.0))))
 
         nova_sessao = SessaoTreino(
             ficha_id=ficha_id,
@@ -375,6 +484,19 @@ def listar_historico_sessoes(limite: int = 20) -> list[dict[str, Any]]:
             if calorias is None and duracao_seg:
                 calorias = max(1, int(round(6.0 * 77.6 * (duracao_seg / 3600.0))))
 
+            calorias_finais = int(calorias or 0)
+            minutos_duracao = (duracao_seg / 60.0) if (duracao_seg and duracao_seg > 0) else 0.0
+            kcal_por_min = (
+                round(calorias_finais / minutos_duracao, 1)
+                if minutos_duracao > 0
+                else 0.0
+            )
+            intensidade_sessao = _classificar_intensidade_sessao(
+                kcal_por_min=kcal_por_min,
+                fc_media=s.fc_media,
+                percepcao_esforco=s.percepcao_esforco,
+            )
+
             resumo_exercicios = [
                 f"{sr.exercicio.nome if sr.exercicio else 'Ex'}: {sr.carga_kg:g}kg x {sr.repeticoes}"
                 for sr in s.series[:4]
@@ -389,7 +511,9 @@ def listar_historico_sessoes(limite: int = 20) -> list[dict[str, Any]]:
                     "tonelagem_kg": tonelagem,
                     "total_series": total_series,
                     "fc_media": s.fc_media,
-                    "calorias_estimadas": calorias or 0,
+                    "calorias_estimadas": calorias_finais,
+                    "kcal_por_min": kcal_por_min,
+                    "intensidade_sessao": intensidade_sessao,
                     "percepcao_esforco": s.percepcao_esforco,
                     "notas": s.notas,
                     "resumo_exercicios": resumo_exercicios,

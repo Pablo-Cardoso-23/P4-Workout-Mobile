@@ -1,12 +1,24 @@
 from collections.abc import Generator
 from contextlib import contextmanager
+import os
 from typing import Any
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
-DATABASE_URL = "sqlite:///./p4workout.db"
+
+def _resolver_database_url() -> str:
+    """Resolve o caminho do SQLite para FLET_APP_STORAGE_DATA (Android/iOS) ou diretório local (Desktop)."""
+    storage_dir = os.getenv("FLET_APP_STORAGE_DATA")
+    if storage_dir:
+        os.makedirs(storage_dir, exist_ok=True)
+        db_path = os.path.join(storage_dir, "p4workout.db")
+        return f"sqlite:///{db_path}"
+    return "sqlite:///./p4workout.db"
+
+
+DATABASE_URL = _resolver_database_url()
 
 engine = create_engine(
     DATABASE_URL,

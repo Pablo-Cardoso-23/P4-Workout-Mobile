@@ -35,10 +35,10 @@ from views.routines_view import (
 )
 
 TIPOS_SERIE = [
-    ("W", "W • Trabalho"),
-    ("A", "A • Aquec."),
-    ("D", "D • Dropset"),
-    ("F", "F • Falha"),
+    ("W", "W — Trabalho"),
+    ("A", "A — Aquecimento"),
+    ("D", "D — Dropset"),
+    ("F", "F — Falha"),
 ]
 
 
@@ -96,14 +96,23 @@ def build_train_view(page: ft.Page) -> ft.Control:
         text_size=13,
         expand=True,
     )
+    tf_calorias_ativo = ft.TextField(
+        label="Calorias (kcal)",
+        hint_text="Ex: 420 (opcional)",
+        keyboard_type=ft.KeyboardType.NUMBER,
+        border=construir_borda_input(),
+        color=PURE_WHITE,
+        text_size=13,
+        expand=True,
+    )
     tf_rpe_ativo = ft.TextField(
-        label="RPE Geral (1-10)",
+        label="RPE (1-10)",
         value="8",
         keyboard_type=ft.KeyboardType.NUMBER,
         border=construir_borda_input(),
         color=PURE_WHITE,
         text_size=13,
-        width=135,
+        width=95,
     )
 
     # Controles do Registro Manual de Treino Muscular
@@ -117,6 +126,15 @@ def build_train_view(page: ft.Page) -> ft.Control:
     tf_duracao_manual = ft.TextField(
         label="Duração (min)",
         value="55",
+        keyboard_type=ft.KeyboardType.NUMBER,
+        border=construir_borda_input(),
+        color=PURE_WHITE,
+        text_size=13,
+        expand=True,
+    )
+    tf_calorias_manual = ft.TextField(
+        label="Calorias (kcal)",
+        hint_text="Ex: 420 (opcional)",
         keyboard_type=ft.KeyboardType.NUMBER,
         border=construir_borda_input(),
         color=PURE_WHITE,
@@ -138,7 +156,7 @@ def build_train_view(page: ft.Page) -> ft.Control:
         border=construir_borda_input(),
         color=PURE_WHITE,
         text_size=13,
-        width=100,
+        expand=True,
     )
     tf_notas_manual = ft.TextField(
         label="Notas / Observações (opcional)",
@@ -240,6 +258,11 @@ def build_train_view(page: ft.Page) -> ft.Control:
             fid_val = int(dd_ficha_manual.value or "0")
             ficha_id_sel = fid_val if fid_val > 0 else None
             dur_min = int(float((tf_duracao_manual.value or "50").replace(",", ".")))
+            cal_val = (
+                int(float(tf_calorias_manual.value.replace(",", ".")))
+                if (tf_calorias_manual.value and tf_calorias_manual.value.strip())
+                else None
+            )
             fc_val = (
                 int(tf_fc_manual.value)
                 if (tf_fc_manual.value and tf_fc_manual.value.strip())
@@ -253,12 +276,14 @@ def build_train_view(page: ft.Page) -> ft.Control:
                 fc_media=fc_val,
                 percepcao_esforco=rpe_val,
                 notas=tf_notas_manual.value,
+                calorias_manuais=cal_val,
             )
             tf_notas_manual.value = ""
             tf_fc_manual.value = ""
+            tf_calorias_manual.value = ""
             form_manual_visivel = False
             notificar(
-                f"Treino manual salvo! {dur_min} min • ~{sessao.calorias_estimadas} kcal"
+                f"Treino manual salvo! {dur_min} min • {sessao.calorias_estimadas} kcal"
             )
             renderizar()
         except Exception as exc:
@@ -268,6 +293,141 @@ def build_train_view(page: ft.Page) -> ft.Control:
         excluir_sessao(sessao_id)
         notificar("Sessão removida do histórico.")
         renderizar()
+
+    def abrir_legenda_tipos_serie(_: Any = None) -> None:
+        itens_legenda = [
+            (
+                "W — Trabalho (Work Set)",
+                "Séries válidas principais da ficha; entram no cálculo de 1RM e recordes pessoais.",
+            ),
+            (
+                "A — Aquecimento",
+                "Séries preparatórias com carga leve antes das séries principais.",
+            ),
+            (
+                "D — Dropset",
+                "Redução imediata de carga sem intervalo de descanso.",
+            ),
+            (
+                "F — Falha",
+                "Série executada até a falha concêntrica total (também contabilizada no 1RM).",
+            ),
+        ]
+        controles_legenda: list[ft.Control] = []
+        for sigla_titulo, desc_txt in itens_legenda:
+            controles_legenda.append(
+                ft.Container(
+                    bgcolor=DARK_BG,
+                    border=ft.Border.all(1, ORCELA_BORDER_GLOW),
+                    border_radius=8,
+                    padding=10,
+                    content=ft.Column(
+                        spacing=3,
+                        controls=[
+                            ft.Text(
+                                sigla_titulo,
+                                size=13,
+                                weight=ft.FontWeight.BOLD,
+                                color=ORCELA_BLUE,
+                            ),
+                            ft.Text(
+                                desc_txt,
+                                size=12,
+                                color=PURE_WHITE,
+                            ),
+                        ],
+                    ),
+                )
+            )
+
+        dlg_info = ft.AlertDialog(
+            bgcolor=CARD_BG,
+            shape=ft.RoundedRectangleBorder(
+                radius=14, side=ft.BorderSide(width=1, color=ORCELA_BORDER_GLOW)
+            ),
+            title=ft.Row(
+                spacing=8,
+                controls=[
+                    ft.Icon(
+                        ft.Icons.INFO_OUTLINE_ROUNDED,
+                        color=ORCELA_BLUE,
+                        size=22,
+                    ),
+                    ft.Text(
+                        "Tipos de Série",
+                        size=17,
+                        weight=ft.FontWeight.BOLD,
+                        color=PURE_WHITE,
+                    ),
+                ],
+            ),
+            content=ft.Column(
+                tight=True,
+                spacing=8,
+                controls=controles_legenda,
+            ),
+            actions=[
+                ft.TextButton(
+                    content="Entendi",
+                    on_click=lambda _: page.pop_dialog(),
+                )
+            ],
+        )
+        page.show_dialog(dlg_info)
+
+    def descartar_sessao_ativa(_: Any = None) -> None:
+        nonlocal sessao_ativa_id, ficha_ativa, confirmando_fim_ativo
+        parar_cronometro(atualizar_pagina=False)
+        if sessao_ativa_id is not None:
+            excluir_sessao(sessao_ativa_id)
+        sessao_ativa_id = None
+        ficha_ativa = None
+        confirmando_fim_ativo = False
+        series_concluidas.clear()
+        notificar("Sessão descartada.")
+        renderizar()
+
+    def solicitar_cancelamento_sessao(_: Any = None) -> None:
+        if sessao_ativa_id is None:
+            return
+        if not series_concluidas:
+            descartar_sessao_ativa()
+            return
+
+        def _confirmar_descarte(_: Any) -> None:
+            page.pop_dialog()
+            descartar_sessao_ativa()
+
+        dlg_cancelar = ft.AlertDialog(
+            bgcolor=CARD_BG,
+            shape=ft.RoundedRectangleBorder(
+                radius=14, side=ft.BorderSide(width=1, color=ORCELA_BORDER_GLOW)
+            ),
+            title=ft.Text(
+                "Cancelar Sessão Ativa?",
+                size=16,
+                weight=ft.FontWeight.BOLD,
+                color=PURE_WHITE,
+            ),
+            content=ft.Text(
+                f"Você já registrou {len(series_concluidas)} série(s) neste treino. Deseja descartar o progresso e sair?",
+                size=13,
+                color=TEXT_MUTED,
+            ),
+            actions=[
+                ft.TextButton(
+                    content="Continuar Treinando",
+                    on_click=lambda _: page.pop_dialog(),
+                ),
+                ft.Button(
+                    content="Descartar Treino",
+                    bgcolor=DANGER_RED,
+                    color=PURE_WHITE,
+                    on_click=_confirmar_descarte,
+                ),
+            ],
+        )
+        page.show_dialog(dlg_cancelar)
 
     def comecar_treino(ficha_id: int) -> None:
         nonlocal sessao_ativa_id, ficha_ativa, confirmando_fim_ativo
@@ -283,6 +443,7 @@ def build_train_view(page: ft.Page) -> ft.Control:
         series_concluidas.clear()
         tf_notas_sessao.value = ""
         tf_fc_ativo.value = ""
+        tf_calorias_ativo.value = ""
         tf_rpe_ativo.value = "8"
         parar_cronometro(atualizar_pagina=False)
         renderizar()
@@ -303,6 +464,11 @@ def build_train_view(page: ft.Page) -> ft.Control:
                 if (tf_fc_ativo.value and tf_fc_ativo.value.strip())
                 else None
             )
+            cal_val = (
+                int(float(tf_calorias_ativo.value.replace(",", ".")))
+                if (tf_calorias_ativo.value and tf_calorias_ativo.value.strip())
+                else None
+            )
             rpe_val = (
                 int(tf_rpe_ativo.value)
                 if (tf_rpe_ativo.value and tf_rpe_ativo.value.strip())
@@ -310,6 +476,7 @@ def build_train_view(page: ft.Page) -> ft.Control:
             )
         except ValueError:
             fc_val = None
+            cal_val = None
             rpe_val = 8
 
         sessao_fin = finalizar_sessao(
@@ -317,6 +484,7 @@ def build_train_view(page: ft.Page) -> ft.Control:
             notas=tf_notas_sessao.value,
             fc_media=fc_val,
             percepcao_esforco=rpe_val,
+            calorias_manuais=cal_val,
         )
         total_series = len(series_concluidas)
         sessao_ativa_id = None
@@ -339,9 +507,10 @@ def build_train_view(page: ft.Page) -> ft.Control:
     ) -> ft.Container:
         tf_carga = ft.TextField(
             value=f"{carga_sugerida:g}",
-            width=68,
-            height=40,
-            content_padding=ft.Padding.symmetric(horizontal=8, vertical=6),
+            expand=True,
+            height=38,
+            text_align=ft.TextAlign.CENTER,
+            content_padding=ft.Padding.symmetric(horizontal=4, vertical=8),
             keyboard_type=ft.KeyboardType.NUMBER,
             border=construir_borda_input(6.0),
             color=PURE_WHITE,
@@ -349,9 +518,10 @@ def build_train_view(page: ft.Page) -> ft.Control:
         )
         tf_reps = ft.TextField(
             value=str(reps_sugeridas),
-            width=56,
-            height=40,
-            content_padding=ft.Padding.symmetric(horizontal=8, vertical=6),
+            expand=True,
+            height=38,
+            text_align=ft.TextAlign.CENTER,
+            content_padding=ft.Padding.symmetric(horizontal=4, vertical=8),
             keyboard_type=ft.KeyboardType.NUMBER,
             border=construir_borda_input(6.0),
             color=PURE_WHITE,
@@ -359,22 +529,55 @@ def build_train_view(page: ft.Page) -> ft.Control:
         )
         tf_rir = ft.TextField(
             value=str(rir_sugerido) if rir_sugerido is not None else "2",
-            width=48,
-            height=40,
-            content_padding=ft.Padding.symmetric(horizontal=6, vertical=6),
+            expand=True,
+            height=38,
+            text_align=ft.TextAlign.CENTER,
+            content_padding=ft.Padding.symmetric(horizontal=4, vertical=8),
             keyboard_type=ft.KeyboardType.NUMBER,
             border=construir_borda_input(6.0),
             color=PURE_WHITE,
             text_size=13,
         )
-        dd_tipo = ft.Dropdown(
-            value=tipo_sugerido if tipo_sugerido in {"W", "A", "D", "F"} else "W",
-            width=74,
-            border=construir_borda_input(6.0),
-            color=PURE_WHITE,
-            text_size=12,
-            options=[
-                ft.dropdown.Option(key=cod, text=cod) for cod, _ in TIPOS_SERIE
+        tipo_atual = (
+            tipo_sugerido if tipo_sugerido in {"W", "A", "D", "F"} else "W"
+        )
+        txt_tipo_selecionado = ft.Text(
+            tipo_atual,
+            size=14,
+            weight=ft.FontWeight.BOLD,
+            color=ORCELA_BLUE,
+        )
+
+        def selecionar_tipo_serie(novo_cod: str) -> None:
+            nonlocal tipo_atual
+            tipo_atual = novo_cod
+            txt_tipo_selecionado.value = novo_cod
+            page.update()
+
+        seletor_tipo = ft.PopupMenuButton(
+            width=46,
+            height=40,
+            tooltip="Selecionar tipo de série",
+            content=ft.Container(
+                width=46,
+                height=38,
+                bgcolor="#141414",
+                border=ft.Border.all(1, ORCELA_BORDER_GLOW),
+                border_radius=8,
+                alignment=ft.Alignment.CENTER,
+                content=txt_tipo_selecionado,
+            ),
+            items=[
+                ft.PopupMenuItem(
+                    content=ft.Text(
+                        desc_item,
+                        size=13,
+                        weight=ft.FontWeight.W_500,
+                        color=PURE_WHITE,
+                    ),
+                    on_click=lambda _, c=cod_item: selecionar_tipo_serie(c),
+                )
+                for cod_item, desc_item in TIPOS_SERIE
             ],
         )
 
@@ -386,6 +589,9 @@ def build_train_view(page: ft.Page) -> ft.Control:
             if ja_concluida
             else ft.Icons.CHECK_CIRCLE_OUTLINE_ROUNDED,
             icon_color=ORCELA_BLUE if ja_concluida else TEXT_MUTED,
+            icon_size=20,
+            width=36,
+            height=36,
             tooltip="Registrar Série",
         )
 
@@ -395,7 +601,7 @@ def build_train_view(page: ft.Page) -> ft.Control:
                 1, ORCELA_BLUE if ja_concluida else ORCELA_BORDER_GLOW
             ),
             border_radius=8,
-            padding=ft.Padding.symmetric(horizontal=8, vertical=6),
+            padding=ft.Padding.symmetric(horizontal=6, vertical=6),
         )
 
         def ao_confirmar_serie(_: Any) -> None:
@@ -420,7 +626,7 @@ def build_train_view(page: ft.Page) -> ft.Control:
                 carga_kg=carga_val,
                 repeticoes=reps_val,
                 rir=rir_val,
-                tipo_serie=dd_tipo.value or "W",
+                tipo_serie=tipo_atual,
             )
             series_concluidas.add(chave_serie)
             btn_check.icon = ft.Icons.CHECK_CIRCLE_ROUNDED
@@ -435,16 +641,16 @@ def build_train_view(page: ft.Page) -> ft.Control:
         linha_container.content = ft.Row(
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            spacing=6,
+            spacing=4,
             controls=[
                 ft.Text(
                     f"#{numero_serie}",
-                    size=13,
+                    size=12,
                     weight=ft.FontWeight.BOLD,
                     color=ORCELA_BLUE,
-                    width=24,
+                    width=22,
                 ),
-                dd_tipo,
+                seletor_tipo,
                 tf_carga,
                 tf_reps,
                 tf_rir,
@@ -470,13 +676,62 @@ def build_train_view(page: ft.Page) -> ft.Control:
             linhas_series: list[ft.Control] = [
                 ft.Row(
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    spacing=4,
                     controls=[
                         ft.Text("Série", size=11, color=TEXT_MUTED, width=28),
-                        ft.Text("Tipo", size=11, color=TEXT_MUTED, width=68),
-                        ft.Text("Carga (kg)", size=11, color=TEXT_MUTED, width=68),
-                        ft.Text("Reps", size=11, color=TEXT_MUTED, width=52),
-                        ft.Text("RIR", size=11, color=TEXT_MUTED, width=44),
-                        ft.Text("OK", size=11, color=TEXT_MUTED, width=32),
+                        ft.GestureDetector(
+                            on_tap=abrir_legenda_tipos_serie,
+                            content=ft.Container(
+                                width=46,
+                                tooltip="Ver significado dos tipos de série",
+                                content=ft.Row(
+                                    spacing=3,
+                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                    controls=[
+                                        ft.Text(
+                                            "Tipo",
+                                            size=11,
+                                            weight=ft.FontWeight.BOLD,
+                                            color=ORCELA_BLUE,
+                                        ),
+                                        ft.Icon(
+                                            ft.Icons.INFO_OUTLINE_ROUNDED,
+                                            size=14,
+                                            color=ORCELA_BLUE,
+                                        ),
+                                    ],
+                                ),
+                            ),
+                        ),
+                        ft.Text(
+                            "Carga (kg)",
+                            size=11,
+                            color=TEXT_MUTED,
+                            expand=True,
+                            text_align=ft.TextAlign.CENTER,
+                        ),
+                        ft.Text(
+                            "Reps",
+                            size=11,
+                            color=TEXT_MUTED,
+                            expand=True,
+                            text_align=ft.TextAlign.CENTER,
+                        ),
+                        ft.Text(
+                            "RIR",
+                            size=11,
+                            color=TEXT_MUTED,
+                            expand=True,
+                            text_align=ft.TextAlign.CENTER,
+                        ),
+                        ft.Text(
+                            "OK",
+                            size=11,
+                            color=TEXT_MUTED,
+                            width=36,
+                            text_align=ft.TextAlign.CENTER,
+                        ),
                     ],
                 )
             ]
@@ -578,7 +833,10 @@ def build_train_view(page: ft.Page) -> ft.Control:
                                 weight=ft.FontWeight.BOLD,
                                 color=PURE_WHITE,
                             ),
-                            ft.Row(spacing=8, controls=[tf_fc_ativo, tf_rpe_ativo]),
+                            ft.Row(
+                                spacing=8,
+                                controls=[tf_calorias_ativo, tf_fc_ativo, tf_rpe_ativo],
+                            ),
                             tf_notas_sessao,
                             ft.Button(
                                 content="CONFIRMAR E SALVAR TREINO",
@@ -619,6 +877,13 @@ def build_train_view(page: ft.Page) -> ft.Control:
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 spacing=8,
                 controls=[
+                    ft.IconButton(
+                        icon=ft.Icons.ARROW_BACK_ROUNDED,
+                        icon_color=PURE_WHITE,
+                        bgcolor=ORCELA_DARK_SURFACE,
+                        tooltip="Voltar / Cancelar Sessão",
+                        on_click=solicitar_cancelamento_sessao,
+                    ),
                     ft.Column(
                         spacing=2,
                         expand=True,
@@ -629,6 +894,8 @@ def build_train_view(page: ft.Page) -> ft.Control:
                                 size=12,
                                 color=ORCELA_BLUE,
                                 weight=ft.FontWeight.BOLD,
+                                max_lines=1,
+                                overflow=ft.TextOverflow.ELLIPSIS,
                             ),
                         ],
                     ),
@@ -800,26 +1067,57 @@ def build_train_view(page: ft.Page) -> ft.Control:
                 )
             )
         else:
-            for hs in historico_sessoes:
-                partes_badge: list[str] = []
-                if hs["percepcao_esforco"] is not None:
-                    partes_badge.append(f"RPE {hs['percepcao_esforco']}/10")
-                if hs["fc_media"] is not None:
-                    partes_badge.append(f"{hs['fc_media']} bpm")
-                texto_intensidade = (
-                    " • ".join(partes_badge) if partes_badge else "Concluído"
+            def _construir_pilula_badge(texto: str) -> ft.Container:
+                return ft.Container(
+                    bgcolor=ORCELA_DARK_SURFACE,
+                    border=ft.Border.all(1, ORCELA_BORDER_HIGHLIGHT),
+                    padding=ft.Padding.symmetric(horizontal=8, vertical=3),
+                    border_radius=6,
+                    content=ft.Text(
+                        texto,
+                        size=11,
+                        weight=ft.FontWeight.BOLD,
+                        color=ORCELA_BLUE,
+                    ),
                 )
 
-                tonelagem_str = (
-                    f"{hs['tonelagem_kg']:.0f} kg vol"
-                    if hs["tonelagem_kg"] > 0
-                    else f"{hs['calorias_estimadas']} kcal"
+            for hs in historico_sessoes:
+                intensidade_lbl = str(hs.get("intensidade_sessao", "Moderada"))
+                kcal_min = float(hs.get("kcal_por_min", 0.0))
+                pilulas_badges: list[ft.Control] = [
+                    _construir_pilula_badge(f"Intensidade {intensidade_lbl}")
+                ]
+                if hs["percepcao_esforco"] is not None:
+                    pilulas_badges.append(
+                        _construir_pilula_badge(f"RPE {hs['percepcao_esforco']}/10")
+                    )
+                if hs["fc_media"] is not None:
+                    pilulas_badges.append(
+                        _construir_pilula_badge(f"{hs['fc_media']} bpm")
+                    )
+
+                metricas_rodape: list[ft.Control] = []
+                if hs["tonelagem_kg"] > 0:
+                    metricas_rodape.append(
+                        ft.Text(
+                            f"Volume: {hs['tonelagem_kg']:.0f} kg",
+                            size=12,
+                            color=ORCELA_BLUE,
+                            weight=ft.FontWeight.BOLD,
+                        )
+                    )
+                metricas_rodape.append(
+                    ft.Text(
+                        f"{hs['total_series']} séries • {hs['calorias_estimadas']} kcal ({kcal_min:.1f} kcal/min)",
+                        size=12,
+                        color=PURE_WHITE,
+                    )
                 )
 
                 controles_card_hist: list[ft.Control] = [
                     ft.Row(
                         alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        vertical_alignment=ft.CrossAxisAlignment.START,
                         spacing=8,
                         controls=[
                             ft.Column(
@@ -828,33 +1126,23 @@ def build_train_view(page: ft.Page) -> ft.Control:
                                 controls=[
                                     ft.Text(
                                         str(hs["nome_ficha"]),
-                                        size=14,
+                                        size=16,
                                         weight=ft.FontWeight.BOLD,
                                         color=PURE_WHITE,
+                                        max_lines=2,
+                                        overflow=ft.TextOverflow.ELLIPSIS,
                                     ),
                                     ft.Text(
                                         f"{hs['data_fmt']} • {hs['duracao_fmt']}",
-                                        size=11,
+                                        size=12,
                                         color=TEXT_MUTED,
                                     ),
                                 ],
                             ),
-                            ft.Container(
-                                bgcolor=ORCELA_DARK_SURFACE,
-                                padding=ft.Padding.symmetric(
-                                    horizontal=8, vertical=4
-                                ),
-                                border_radius=6,
-                                content=ft.Text(
-                                    texto_intensidade,
-                                    size=10,
-                                    weight=ft.FontWeight.BOLD,
-                                    color=ORCELA_BLUE,
-                                ),
-                            ),
                             ft.IconButton(
                                 icon=ft.Icons.DELETE_OUTLINE_ROUNDED,
                                 icon_color=DANGER_RED,
+                                icon_size=20,
                                 tooltip="Excluir treino",
                                 on_click=lambda _, sid=hs["id"]: remover_sessao_historico(
                                     sid
@@ -863,20 +1151,16 @@ def build_train_view(page: ft.Page) -> ft.Control:
                         ],
                     ),
                     ft.Row(
-                        spacing=12,
-                        controls=[
-                            ft.Text(
-                                f"Volume: {tonelagem_str}",
-                                size=12,
-                                color=ORCELA_BLUE,
-                                weight=ft.FontWeight.BOLD,
-                            ),
-                            ft.Text(
-                                f"{hs['total_series']} séries • ~{hs['calorias_estimadas']} kcal",
-                                size=12,
-                                color=PURE_WHITE,
-                            ),
-                        ],
+                        wrap=True,
+                        spacing=6,
+                        run_spacing=6,
+                        controls=pilulas_badges,
+                    ),
+                    ft.Row(
+                        wrap=True,
+                        spacing=8,
+                        run_spacing=4,
+                        controls=metricas_rodape,
                     ),
                 ]
 
@@ -991,6 +1275,12 @@ def build_train_view(page: ft.Page) -> ft.Control:
                                 spacing=8,
                                 controls=[
                                     tf_duracao_manual,
+                                    tf_calorias_manual,
+                                ],
+                            ),
+                            ft.Row(
+                                spacing=8,
+                                controls=[
                                     tf_fc_manual,
                                     tf_rpe_manual,
                                 ],

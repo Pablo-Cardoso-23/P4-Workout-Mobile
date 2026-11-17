@@ -1,0 +1,23 @@
+[project]
+name = "p4-workout"
+version = "1.0.0"
+description = "P4 Workout - Treino, Cardio e Nutricao Offline"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "flet",
+    "sqlalchemy",
+    "pydantic",
+]
+
+[tool.flet]
+org = "com.pabloramos"
+product = "P4 Workout"
+project = "p4_workout"
+assets_dir = "assets"
+permissions = ["internet"]
+
+[tool.flet.splash]
+color = "#0F0F0F"
+dark_color = "#0F0F0F"
+android = true
