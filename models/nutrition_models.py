@@ -29,6 +29,14 @@ class ItemChecklistNutri(Base):
     titulo: Mapped[str] = mapped_column(String(160), nullable=False)
     categoria: Mapped[str] = mapped_column(String(40), nullable=False, default="Refeição")
     proteina_estimada_g: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    quantidade_gramas: Mapped[float] = mapped_column(
+        Float, nullable=False, default=100.0
+    )
+    tipo_macro: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="Proteína"
+    )
+    proteina_g: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    carboidrato_g: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     ordem: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
@@ -144,6 +152,9 @@ class SuplementoEstoque(Base):
     unidade: Mapped[str] = mapped_column(String(20), nullable=False, default="doses")
     quantidade_total: Mapped[float] = mapped_column(Float, nullable=False, default=80.0)
     quantidade_atual: Mapped[float] = mapped_column(Float, nullable=False, default=80.0)
+    peso_total_g: Mapped[float] = mapped_column(Float, nullable=False, default=300.0)
+    peso_restante_g: Mapped[float] = mapped_column(Float, nullable=False, default=300.0)
+    dose_padrao_g: Mapped[float] = mapped_column(Float, nullable=False, default=5.0)
     consumo_diario_padrao: Mapped[float] = mapped_column(
         Float, nullable=False, default=1.0
     )

@@ -48,7 +48,7 @@ def build_cardio_view(page: ft.Page) -> ft.Control:
     form_manual_visivel: bool = False
 
     container_raiz = ft.Column(
-        scroll=ft.ScrollMode.AUTO,
+        scroll=ft.ScrollMode.HIDDEN,
         expand=True,
         spacing=16,
     )
@@ -531,6 +531,8 @@ def build_cardio_view(page: ft.Page) -> ft.Control:
                 shadow=construir_sombra_orcela(),
                 border_radius=14,
                 padding=16,
+                animate_opacity=ft.Animation(300, ft.AnimationCurve.EASE_OUT),
+                animate_scale=ft.Animation(300, ft.AnimationCurve.EASE_OUT_BACK),
                 content=ft.Column(spacing=12, controls=controles_vivo),
             )
         )
@@ -578,6 +580,8 @@ def build_cardio_view(page: ft.Page) -> ft.Control:
                         shadow=construir_sombra_orcela(),
                         border_radius=12,
                         padding=14,
+                        animate_opacity=ft.Animation(300, ft.AnimationCurve.EASE_OUT),
+                        animate_scale=ft.Animation(300, ft.AnimationCurve.EASE_OUT_BACK),
                         content=ft.Row(
                             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                             vertical_alignment=ft.CrossAxisAlignment.CENTER,

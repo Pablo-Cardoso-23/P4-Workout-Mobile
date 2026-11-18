@@ -74,6 +74,7 @@ class FichaExercicio(Base):
     series_alvo: Mapped[int] = mapped_column(Integer, nullable=False, default=4)
     reps_alvo: Mapped[str] = mapped_column(String(20), nullable=False, default="8-12")
     descanso_segundos: Mapped[int] = mapped_column(Integer, nullable=False, default=90)
+    observacoes: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
     ficha: Mapped["Ficha"] = relationship("Ficha", back_populates="itens")
     exercicio: Mapped["Exercicio"] = relationship("Exercicio", back_populates="ficha_itens", lazy="joined")

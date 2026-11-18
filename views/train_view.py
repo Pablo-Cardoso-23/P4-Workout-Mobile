@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime
 import threading
 import time
@@ -54,23 +55,34 @@ def _extrair_reps_padrao(reps_alvo: str) -> int:
 def build_train_view(page: ft.Page) -> ft.Control:
     """Constrói a view modular de Execução de Treino, Registro Manual e Histórico."""
     sessao_ativa_id: int | None = None
+    sessao_data_inicio: datetime | None = None
     ficha_ativa: Ficha | None = None
     series_concluidas: set[tuple[int, int]] = set()
     timer_segundos_restantes: int = 0
     timer_rodando: bool = False
     timer_token: int = 0
+    relogio_treino_token: int = 0
+    celebracao_token: int = 0
     form_manual_visivel: bool = False
     confirmando_fim_ativo: bool = False
+    celebracao_ativa: bool = False
+    dados_celebracao: dict[str, Any] = {}
 
     container_raiz = ft.Column(
-        scroll=ft.ScrollMode.AUTO,
         expand=True,
-        spacing=16,
+        spacing=8,
+    )
+
+    txt_tempo_total_treino = ft.Text(
+        "00:00:00",
+        size=13,
+        weight=ft.FontWeight.W_900,
+        color=PURE_WHITE,
     )
 
     txt_cronometro = ft.Text(
         "Descanso: Pronto",
-        size=14,
+        size=13,
         weight=ft.FontWeight.BOLD,
         color=PURE_WHITE,
     )
@@ -176,6 +188,36 @@ def build_train_view(page: ft.Page) -> ft.Control:
                 bgcolor=DANGER_RED if erro else ORCELA_BLUE,
             )
         )
+
+    def iniciar_relogio_sessao() -> None:
+        nonlocal relogio_treino_token
+        relogio_treino_token += 1
+        meu_token = relogio_treino_token
+
+        def _loop_relogio() -> None:
+            while sessao_ativa_id is not None and relogio_treino_token == meu_token:
+                if sessao_data_inicio is not None:
+                    decorrido = max(
+                        0,
+                        int((datetime.now() - sessao_data_inicio).total_seconds()),
+                    )
+                    horas, resto = divmod(decorrido, 3600)
+                    mins, segs = divmod(resto, 60)
+                    txt_tempo_total_treino.value = (
+                        f"{horas:02d}:{mins:02d}:{segs:02d}"
+                    )
+                    try:
+                        page.update()
+                    except Exception:
+                        break
+                time.sleep(1)
+
+        threading.Thread(target=_loop_relogio, daemon=True).start()
+
+    def parar_relogio_sessao() -> None:
+        nonlocal relogio_treino_token
+        relogio_treino_token += 1
+        txt_tempo_total_treino.value = "00:00:00"
 
     def disparar_cronometro(segundos_totais: int) -> None:
         nonlocal timer_segundos_restantes, timer_rodando, timer_token
@@ -376,11 +418,13 @@ def build_train_view(page: ft.Page) -> ft.Control:
         page.show_dialog(dlg_info)
 
     def descartar_sessao_ativa(_: Any = None) -> None:
-        nonlocal sessao_ativa_id, ficha_ativa, confirmando_fim_ativo
+        nonlocal sessao_ativa_id, sessao_data_inicio, ficha_ativa, confirmando_fim_ativo
         parar_cronometro(atualizar_pagina=False)
+        parar_relogio_sessao()
         if sessao_ativa_id is not None:
             excluir_sessao(sessao_ativa_id)
         sessao_ativa_id = None
+        sessao_data_inicio = None
         ficha_ativa = None
         confirmando_fim_ativo = False
         series_concluidas.clear()
@@ -430,7 +474,7 @@ def build_train_view(page: ft.Page) -> ft.Control:
         page.show_dialog(dlg_cancelar)
 
     def comecar_treino(ficha_id: int) -> None:
-        nonlocal sessao_ativa_id, ficha_ativa, confirmando_fim_ativo
+        nonlocal sessao_ativa_id, sessao_data_inicio, ficha_ativa, confirmando_fim_ativo
         ficha_carregada = obter_ficha_por_id(ficha_id)
         if ficha_carregada is None:
             notificar("Ficha não encontrada.", erro=True)
@@ -438,6 +482,7 @@ def build_train_view(page: ft.Page) -> ft.Control:
 
         sessao = iniciar_sessao(ficha_id=ficha_id)
         sessao_ativa_id = sessao.id
+        sessao_data_inicio = sessao.data_inicio
         ficha_ativa = ficha_carregada
         confirmando_fim_ativo = False
         series_concluidas.clear()
@@ -446,6 +491,7 @@ def build_train_view(page: ft.Page) -> ft.Control:
         tf_calorias_ativo.value = ""
         tf_rpe_ativo.value = "8"
         parar_cronometro(atualizar_pagina=False)
+        iniciar_relogio_sessao()
         renderizar()
 
     def abrir_confirmacao_fim_treino(_: Any = None) -> None:
@@ -454,10 +500,11 @@ def build_train_view(page: ft.Page) -> ft.Control:
         renderizar()
 
     def concluir_treino_ativo(_: Any = None) -> None:
-        nonlocal sessao_ativa_id, ficha_ativa, confirmando_fim_ativo
+        nonlocal sessao_ativa_id, sessao_data_inicio, ficha_ativa, confirmando_fim_ativo
         if sessao_ativa_id is None:
             return
         parar_cronometro(atualizar_pagina=False)
+        parar_relogio_sessao()
         try:
             fc_val = (
                 int(tf_fc_ativo.value)
@@ -486,14 +533,47 @@ def build_train_view(page: ft.Page) -> ft.Control:
             percepcao_esforco=rpe_val,
             calorias_manuais=cal_val,
         )
+        historico_recente = listar_historico_sessoes(limite=5)
+        resumo_fin = next(
+            (h for h in historico_recente if h["id"] == sessao_fin.id),
+            None,
+        )
         total_series = len(series_concluidas)
+        nome_ficha_fin = (
+            ficha_ativa.nome if ficha_ativa is not None else "Treino Concluído"
+        )
+        duracao_str = (
+            str(resumo_fin["duracao_fmt"])
+            if resumo_fin is not None
+            else "01 min"
+        )
+        tonelagem_val = (
+            float(resumo_fin["tonelagem_kg"])
+            if resumo_fin is not None
+            else 0.0
+        )
+        calorias_val = int(sessao_fin.calorias_estimadas or 0)
+
+        nonlocal celebracao_ativa, dados_celebracao
+        dados_celebracao = {
+            "nome_ficha": nome_ficha_fin,
+            "duracao_fmt": duracao_str,
+            "tonelagem_kg": tonelagem_val,
+            "calorias_estimadas": calorias_val,
+            "total_series": total_series,
+        }
         sessao_ativa_id = None
+        sessao_data_inicio = None
         ficha_ativa = None
         confirmando_fim_ativo = False
+        celebracao_ativa = True
         series_concluidas.clear()
-        notificar(
-            f"Treino finalizado! {total_series} série(s) • ~{sessao_fin.calorias_estimadas or 0} kcal"
-        )
+        renderizar()
+
+    def fechar_celebracao_retorno(_: Any = None) -> None:
+        nonlocal celebracao_ativa, celebracao_token
+        celebracao_token += 1
+        celebracao_ativa = False
         renderizar()
 
     def construir_linha_serie(
@@ -602,7 +682,23 @@ def build_train_view(page: ft.Page) -> ft.Control:
             ),
             border_radius=8,
             padding=ft.Padding.symmetric(horizontal=6, vertical=6),
+            scale=1.0,
+            animate=ft.Animation(200, ft.AnimationCurve.EASE_OUT),
+            animate_scale=ft.Animation(220, ft.AnimationCurve.EASE_OUT_BACK),
+            animate_opacity=ft.Animation(250, ft.AnimationCurve.EASE_OUT),
         )
+
+        async def _pulsar_confirmacao_serie() -> None:
+            linha_container.scale = 1.04
+            btn_check.scale = 1.15
+            try:
+                page.update()
+                await asyncio.sleep(0.16)
+                linha_container.scale = 1.0
+                btn_check.scale = 1.0
+                page.update()
+            except Exception:
+                pass
 
         def ao_confirmar_serie(_: Any) -> None:
             if sessao_ativa_id is None:
@@ -635,6 +731,11 @@ def build_train_view(page: ft.Page) -> ft.Control:
             linha_container.border = ft.Border.all(1, ORCELA_BLUE)
             disparar_cronometro(descanso_segundos)
             page.update()
+            if hasattr(page, "run_task"):
+                try:
+                    page.run_task(_pulsar_confirmacao_serie)
+                except Exception:
+                    pass
 
         btn_check.on_click = ao_confirmar_serie
 
@@ -871,84 +972,126 @@ def build_train_view(page: ft.Page) -> ft.Control:
                 ]
             )
 
-        return [
-            ft.Row(
-                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                spacing=8,
+        painel_topo_fixo = ft.Container(
+            bgcolor=CARD_BG,
+            border=ft.Border.all(1, ORCELA_BORDER_HIGHLIGHT),
+            shadow=construir_sombra_orcela(),
+            border_radius=14,
+            padding=12,
+            animate_opacity=ft.Animation(300, ft.AnimationCurve.EASE_OUT),
+            animate_scale=ft.Animation(300, ft.AnimationCurve.EASE_OUT_BACK),
+            content=ft.Column(
+                spacing=10,
                 controls=[
-                    ft.IconButton(
-                        icon=ft.Icons.ARROW_BACK_ROUNDED,
-                        icon_color=PURE_WHITE,
-                        bgcolor=ORCELA_DARK_SURFACE,
-                        tooltip="Voltar / Cancelar Sessão",
-                        on_click=solicitar_cancelamento_sessao,
-                    ),
-                    ft.Column(
-                        spacing=2,
-                        expand=True,
+                    ft.Row(
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        spacing=8,
                         controls=[
-                            construir_logo_p4(),
-                            ft.Text(
-                                f"Sessão Ativa • {ficha_ativa.nome}",
-                                size=12,
-                                color=ORCELA_BLUE,
-                                weight=ft.FontWeight.BOLD,
-                                max_lines=1,
-                                overflow=ft.TextOverflow.ELLIPSIS,
+                            ft.IconButton(
+                                icon=ft.Icons.ARROW_BACK_ROUNDED,
+                                icon_color=PURE_WHITE,
+                                bgcolor=ORCELA_DARK_SURFACE,
+                                width=36,
+                                height=36,
+                                icon_size=18,
+                                tooltip="Voltar / Cancelar Sessão",
+                                on_click=solicitar_cancelamento_sessao,
+                            ),
+                            ft.Column(
+                                spacing=1,
+                                expand=True,
+                                controls=[
+                                    ft.Text(
+                                        ficha_ativa.nome,
+                                        size=15,
+                                        weight=ft.FontWeight.BOLD,
+                                        color=PURE_WHITE,
+                                        max_lines=1,
+                                        overflow=ft.TextOverflow.ELLIPSIS,
+                                    ),
+                                    ft.Text(
+                                        "Sessão em andamento",
+                                        size=11,
+                                        color=ORCELA_BLUE,
+                                    ),
+                                ],
+                            ),
+                            ft.Container(
+                                bgcolor=ORCELA_DARK_SURFACE,
+                                border=ft.Border.all(1, ORCELA_BORDER_HIGHLIGHT),
+                                padding=ft.Padding.symmetric(
+                                    horizontal=10, vertical=6
+                                ),
+                                border_radius=8,
+                                content=ft.Row(
+                                    spacing=5,
+                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                    controls=[
+                                        ft.Icon(
+                                            ft.Icons.SCHEDULE_ROUNDED,
+                                            color=ORCELA_BLUE,
+                                            size=15,
+                                        ),
+                                        txt_tempo_total_treino,
+                                    ],
+                                ),
                             ),
                         ],
                     ),
-                    ft.Container(
-                        bgcolor=ORCELA_DARK_SURFACE,
-                        padding=ft.Padding.symmetric(horizontal=10, vertical=6),
-                        border_radius=8,
-                        content=ft.Text(
-                            "EM TREINO",
-                            size=11,
-                            color=PURE_WHITE,
-                            weight=ft.FontWeight.BOLD,
-                        ),
+                    ft.Divider(height=1, color=SURFACE_BORDER),
+                    ft.Column(
+                        spacing=6,
+                        controls=[
+                            ft.Row(
+                                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                controls=[
+                                    ft.Row(
+                                        spacing=6,
+                                        expand=True,
+                                        controls=[
+                                            ft.Icon(
+                                                ft.Icons.TIMER_ROUNDED,
+                                                color=ORCELA_BLUE,
+                                                size=18,
+                                            ),
+                                            txt_cronometro,
+                                        ],
+                                    ),
+                                    ft.OutlinedButton(
+                                        content="Pular",
+                                        icon=ft.Icons.SKIP_NEXT_ROUNDED,
+                                        style=ft.ButtonStyle(
+                                            padding=ft.Padding.symmetric(
+                                                horizontal=10, vertical=4
+                                            ),
+                                        ),
+                                        tooltip="Pular descanso e iniciar próxima série",
+                                        on_click=lambda _: parar_cronometro(True),
+                                    ),
+                                ],
+                            ),
+                            barra_progresso_timer,
+                        ],
                     ),
                 ],
             ),
-            ft.Container(
-                bgcolor=CARD_BG,
-                border=ft.Border.all(1, ORCELA_BORDER_HIGHLIGHT),
-                shadow=construir_sombra_orcela(),
-                border_radius=12,
-                padding=12,
-                content=ft.Column(
-                    spacing=8,
-                    controls=[
-                        ft.Row(
-                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                            controls=[
-                                ft.Row(
-                                    spacing=6,
-                                    controls=[
-                                        ft.Icon(
-                                            ft.Icons.TIMER_ROUNDED,
-                                            color=ORCELA_BLUE,
-                                            size=20,
-                                        ),
-                                        txt_cronometro,
-                                    ],
-                                ),
-                                ft.IconButton(
-                                    icon=ft.Icons.STOP_CIRCLE_OUTLINED,
-                                    icon_color=TEXT_MUTED,
-                                    tooltip="Zerar descanso",
-                                    on_click=lambda _: parar_cronometro(True),
-                                ),
-                            ],
-                        ),
-                        barra_progresso_timer,
-                    ],
-                ),
-            ),
-            *blocos_exercicios,
-            *bloco_finalizacao,
+        )
+
+        corpo_rolavel = ft.Column(
+            scroll=ft.ScrollMode.HIDDEN,
+            expand=True,
+            spacing=14,
+            controls=[
+                *blocos_exercicios,
+                *bloco_finalizacao,
+            ],
+        )
+
+        return [
+            painel_topo_fixo,
+            corpo_rolavel,
         ]
 
     def renderizar_modo_resumo() -> list[ft.Control]:
@@ -1188,6 +1331,8 @@ def build_train_view(page: ft.Page) -> ft.Control:
                         shadow=construir_sombra_orcela(),
                         border_radius=12,
                         padding=14,
+                        animate_opacity=ft.Animation(300, ft.AnimationCurve.EASE_OUT),
+                        animate_scale=ft.Animation(300, ft.AnimationCurve.EASE_OUT_BACK),
                         content=ft.Column(spacing=6, controls=controles_card_hist),
                     )
                 )
@@ -1211,7 +1356,12 @@ def build_train_view(page: ft.Page) -> ft.Control:
                         ],
                     ),
                     ft.OutlinedButton(
-                        content="Registrar Treino Manual",
+                        content=ft.Text(
+                            "Registrar Treino Manual",
+                            size=12,
+                            weight=ft.FontWeight.W_600,
+                            color=ORCELA_BLUE,
+                        ),
                         icon=ft.Icons.ADD_ROUNDED,
                         style=ft.ButtonStyle(
                             padding=ft.Padding.symmetric(horizontal=10, vertical=6),
@@ -1320,10 +1470,320 @@ def build_train_view(page: ft.Page) -> ft.Control:
             *cards_historico,
         ]
 
+    def renderizar_modo_celebracao_finish() -> list[ft.Control]:
+        nonlocal celebracao_token
+        celebracao_token += 1
+        meu_token_cel = celebracao_token
+
+        dur_txt = str(dados_celebracao.get("duracao_fmt", "45 min"))
+        vol_val = float(dados_celebracao.get("tonelagem_kg", 0.0))
+        kcal_val = int(dados_celebracao.get("calorias_estimadas", 0))
+        ficha_txt = str(dados_celebracao.get("nome_ficha", "Sessão Concluída"))
+
+        faisca_esq = ft.Container(
+            width=48,
+            height=6,
+            border_radius=4,
+            gradient=ft.LinearGradient(colors=["#FFD600", "#FF6D00"]),
+            opacity=0.0,
+            scale=0.4,
+            animate_opacity=ft.Animation(250, ft.AnimationCurve.EASE_OUT),
+            animate_scale=ft.Animation(350, ft.AnimationCurve.EASE_OUT_BACK),
+        )
+        faisca_dir = ft.Container(
+            width=48,
+            height=6,
+            border_radius=4,
+            gradient=ft.LinearGradient(colors=["#007BFF", "#FFD600"]),
+            opacity=0.0,
+            scale=0.4,
+            animate_opacity=ft.Animation(250, ft.AnimationCurve.EASE_OUT),
+            animate_scale=ft.Animation(350, ft.AnimationCurve.EASE_OUT_BACK),
+        )
+
+        banner_finish = ft.Container(
+            opacity=0.0,
+            scale=0.3,
+            animate_opacity=ft.Animation(350, ft.AnimationCurve.EASE_OUT),
+            animate_scale=ft.Animation(500, ft.AnimationCurve.BOUNCE_OUT),
+            padding=ft.Padding.symmetric(horizontal=22, vertical=16),
+            border_radius=20,
+            gradient=ft.LinearGradient(
+                colors=["#1A1A1A", "#002B5C", "#1A1A1A"],
+            ),
+            border=ft.Border.all(2, "#FFD600"),
+            shadow=ft.BoxShadow(
+                color="#80007BFF",
+                blur_radius=28,
+                spread_radius=3,
+            ),
+            content=ft.Column(
+                tight=True,
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                spacing=4,
+                controls=[
+                    ft.Row(
+                        alignment=ft.MainAxisAlignment.CENTER,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        spacing=10,
+                        controls=[
+                            faisca_esq,
+                            ft.Icon(
+                                ft.Icons.BOLT_ROUNDED,
+                                color="#FFD600",
+                                size=34,
+                            ),
+                            faisca_dir,
+                        ],
+                    ),
+                    ft.Text(
+                        "FINISH!",
+                        size=54,
+                        weight=ft.FontWeight.W_900,
+                        text_align=ft.TextAlign.CENTER,
+                        style=ft.TextStyle(
+                            color="#FFD600",
+                            shadow=ft.BoxShadow(
+                                color=ORCELA_BLUE,
+                                blur_radius=18,
+                                spread_radius=2,
+                            ),
+                        ),
+                    ),
+                    ft.Container(
+                        width=180,
+                        height=4,
+                        border_radius=3,
+                        gradient=ft.LinearGradient(
+                            colors=["#FF6D00", "#FFD600", "#007BFF"]
+                        ),
+                    ),
+                ],
+            ),
+        )
+
+        subtitulo_concluido = ft.Container(
+            opacity=0.0,
+            animate_opacity=ft.Animation(350, ft.AnimationCurve.EASE_OUT),
+            content=ft.Column(
+                tight=True,
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                spacing=2,
+                controls=[
+                    ft.Text(
+                        "TREINO CONCLUÍDO!",
+                        size=20,
+                        weight=ft.FontWeight.W_900,
+                        color=PURE_WHITE,
+                    ),
+                    ft.Text(
+                        ficha_txt,
+                        size=13,
+                        weight=ft.FontWeight.BOLD,
+                        color=ORCELA_BLUE,
+                    ),
+                ],
+            ),
+        )
+
+        def _criar_pilula_placar(
+            rotulo: str,
+            valor: str,
+            icone: ft.IconData,
+            cor_destaque: str,
+            offset_x_inicial: float,
+        ) -> ft.Container:
+            return ft.Container(
+                bgcolor=CARD_BG,
+                border=ft.Border.all(1, ORCELA_BORDER_HIGHLIGHT),
+                shadow=construir_sombra_orcela(),
+                border_radius=14,
+                padding=ft.Padding.symmetric(horizontal=12, vertical=12),
+                opacity=0.0,
+                offset=ft.Offset(offset_x_inicial, 0.0),
+                animate_opacity=ft.Animation(380, ft.AnimationCurve.EASE_OUT),
+                animate_offset=ft.Animation(
+                    450, ft.AnimationCurve.EASE_OUT_BACK
+                ),
+                content=ft.Row(
+                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    spacing=8,
+                    controls=[
+                        ft.Container(
+                            bgcolor=ORCELA_DARK_SURFACE,
+                            padding=8,
+                            border_radius=10,
+                            content=ft.Icon(
+                                icone, color=cor_destaque, size=20
+                            ),
+                        ),
+                        ft.Text(
+                            rotulo,
+                            size=12,
+                            weight=ft.FontWeight.BOLD,
+                            color=TEXT_MUTED,
+                            expand=True,
+                            max_lines=2,
+                            overflow=ft.TextOverflow.ELLIPSIS,
+                        ),
+                        ft.Text(
+                            valor,
+                            size=17,
+                            weight=ft.FontWeight.W_900,
+                            color=PURE_WHITE,
+                        ),
+                    ],
+                ),
+            )
+
+        pilula_tempo = _criar_pilula_placar(
+            "TEMPO TOTAL DE SESSÃO",
+            dur_txt,
+            ft.Icons.TIMER_ROUNDED,
+            ORCELA_BLUE,
+            -0.35,
+        )
+        pilula_volume = _criar_pilula_placar(
+            "TONELAGEM TOTAL",
+            f"{vol_val:.0f} kg",
+            ft.Icons.FITNESS_CENTER_ROUNDED,
+            "#FFD600",
+            0.35,
+        )
+        pilula_calorias = _criar_pilula_placar(
+            "CALORIAS GASTAS",
+            f"{kcal_val} kcal",
+            ft.Icons.LOCAL_FIRE_DEPARTMENT_ROUNDED,
+            "#FF6D00",
+            -0.35,
+        )
+
+        container_btn_retorno = ft.Container(
+            width=float("inf"),
+            opacity=0.0,
+            scale=0.92,
+            animate_opacity=ft.Animation(350, ft.AnimationCurve.EASE_OUT),
+            animate_scale=ft.Animation(380, ft.AnimationCurve.EASE_IN_OUT),
+            content=ft.FilledButton(
+                content="RETORNAR AO DASHBOARD",
+                icon=ft.Icons.EMOJI_EVENTS_ROUNDED,
+                bgcolor=ORCELA_BLUE,
+                color=PURE_WHITE,
+                width=float("inf"),
+                style=ft.ButtonStyle(
+                    padding=ft.Padding.symmetric(horizontal=20, vertical=14),
+                    shape=ft.RoundedRectangleBorder(radius=12),
+                ),
+                on_click=fechar_celebracao_retorno,
+            ),
+        )
+
+        async def _animar_celebracao_arcade() -> None:
+            try:
+                await asyncio.sleep(0.15)
+                if not celebracao_ativa or celebracao_token != meu_token_cel:
+                    return
+                banner_finish.opacity = 1.0
+                banner_finish.scale = 1.1
+                faisca_esq.opacity = 1.0
+                faisca_esq.scale = 1.2
+                faisca_dir.opacity = 1.0
+                faisca_dir.scale = 1.2
+                page.update()
+
+                await asyncio.sleep(0.28)
+                if not celebracao_ativa or celebracao_token != meu_token_cel:
+                    return
+                banner_finish.scale = 1.0
+                subtitulo_concluido.opacity = 1.0
+                pilula_tempo.opacity = 1.0
+                pilula_tempo.offset = ft.Offset(0.0, 0.0)
+                page.update()
+
+                await asyncio.sleep(0.15)
+                if not celebracao_ativa or celebracao_token != meu_token_cel:
+                    return
+                pilula_volume.opacity = 1.0
+                pilula_volume.offset = ft.Offset(0.0, 0.0)
+                page.update()
+
+                await asyncio.sleep(0.15)
+                if not celebracao_ativa or celebracao_token != meu_token_cel:
+                    return
+                pilula_calorias.opacity = 1.0
+                pilula_calorias.offset = ft.Offset(0.0, 0.0)
+                container_btn_retorno.opacity = 1.0
+                container_btn_retorno.scale = 1.0
+                page.update()
+
+                # Pulso de vitória de 2 segundos no botão e faíscas
+                for _ in range(3):
+                    await asyncio.sleep(0.35)
+                    if not celebracao_ativa or celebracao_token != meu_token_cel:
+                        return
+                    container_btn_retorno.scale = 1.05
+                    faisca_esq.scale = 0.85
+                    faisca_dir.scale = 1.25
+                    page.update()
+
+                    await asyncio.sleep(0.35)
+                    if not celebracao_ativa or celebracao_token != meu_token_cel:
+                        return
+                    container_btn_retorno.scale = 1.0
+                    faisca_esq.scale = 1.25
+                    faisca_dir.scale = 0.85
+                    page.update()
+            except Exception:
+                pass
+
+        if hasattr(page, "run_task"):
+            try:
+                page.run_task(_animar_celebracao_arcade)
+            except Exception:
+                pass
+
+        return [
+            ft.Container(
+                expand=True,
+                bgcolor=DARK_BG,
+                padding=ft.Padding.symmetric(horizontal=8, vertical=16),
+                alignment=ft.Alignment.CENTER,
+                content=ft.Column(
+                    scroll=ft.ScrollMode.HIDDEN,
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                    alignment=ft.MainAxisAlignment.CENTER,
+                    spacing=16,
+                    controls=[
+                        banner_finish,
+                        subtitulo_concluido,
+                        ft.Column(
+                            spacing=10,
+                            controls=[
+                                pilula_tempo,
+                                pilula_volume,
+                                pilula_calorias,
+                            ],
+                        ),
+                        ft.Container(height=4),
+                        container_btn_retorno,
+                    ],
+                ),
+            )
+        ]
+
     def renderizar(atualizar_pagina: bool = True) -> None:
-        if sessao_ativa_id is not None and ficha_ativa is not None:
+        if celebracao_ativa:
+            container_raiz.scroll = None
+            container_raiz.spacing = 0
+            container_raiz.controls = renderizar_modo_celebracao_finish()
+        elif sessao_ativa_id is not None and ficha_ativa is not None:
+            container_raiz.scroll = None
+            container_raiz.spacing = 10
             container_raiz.controls = renderizar_modo_treino_ativo()
         else:
+            container_raiz.scroll = ft.ScrollMode.HIDDEN
+            container_raiz.spacing = 16
             container_raiz.controls = renderizar_modo_resumo()
         if atualizar_pagina:
             page.update()

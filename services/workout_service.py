@@ -263,6 +263,54 @@ def remover_exercicio_ficha(ficha_exercicio_id: int) -> None:
         session.flush()
 
 
+def atualizar_ficha_exercicio(
+    ficha_exercicio_id: int,
+    series_alvo: int,
+    reps_alvo: str,
+    descanso_segundos: int,
+    observacoes: str | None = None,
+) -> None:
+    """Atualiza séries, repetições, descanso e observações de um exercício da ficha."""
+    if series_alvo <= 0:
+        raise ValueError("O número de séries deve ser maior que zero.")
+    if descanso_segundos < 0:
+        raise ValueError("O tempo de descanso não pode ser negativo.")
+    reps_limpo = reps_alvo.strip() or "8-12"
+
+    with get_db_session() as session:
+        item = session.get(FichaExercicio, ficha_exercicio_id)
+        if item is None:
+            raise ValueError(f"Item de ficha #{ficha_exercicio_id} não encontrado.")
+        item.series_alvo = int(series_alvo)
+        item.reps_alvo = reps_limpo
+        item.descanso_segundos = int(descanso_segundos)
+        item.observacoes = (
+            observacoes.strip() if (observacoes and observacoes.strip()) else None
+        )
+        session.flush()
+
+
+def renomear_ficha(
+    ficha_id: int,
+    novo_nome: str,
+    descricao: str | None = None,
+) -> None:
+    """Atualiza o nome e a descrição de uma ficha existente."""
+    nome_limpo = novo_nome.strip()
+    if not nome_limpo:
+        raise ValueError("O nome da ficha não pode ficar vazio.")
+
+    with get_db_session() as session:
+        ficha = session.get(Ficha, ficha_id)
+        if ficha is None:
+            raise ValueError(f"Ficha #{ficha_id} não encontrada.")
+        ficha.nome = nome_limpo
+        ficha.descricao = (
+            descricao.strip() if (descricao and descricao.strip()) else None
+        )
+        session.flush()
+
+
 def obter_ultima_execucao_exercicio(exercicio_id: int) -> list[SerieExecutada]:
     """Retorna as séries da última sessão finalizada daquele exercício para Auto-fill."""
     with get_db_session() as session:

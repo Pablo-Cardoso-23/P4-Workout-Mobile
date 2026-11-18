@@ -49,37 +49,61 @@ ITENS_NUTRI_INICIAIS: list[dict[str, Any]] = [
     {
         "titulo": "Pré-treino: Cuscuz + Pasta de Amendoim",
         "categoria": "Refeição",
-        "proteina_estimada_g": 18.0,
+        "quantidade_gramas": 180.0,
+        "tipo_macro": "Carboidrato",
+        "proteina_estimada_g": 12.0,
+        "proteina_g": 12.0,
+        "carboidrato_g": 45.0,
         "ordem": 1,
     },
     {
         "titulo": "Café Preto",
         "categoria": "Suplemento",
+        "quantidade_gramas": 200.0,
+        "tipo_macro": "Calorias",
         "proteina_estimada_g": 0.0,
+        "proteina_g": 0.0,
+        "carboidrato_g": 0.0,
         "ordem": 2,
     },
     {
         "titulo": "Whey Protein Growth",
         "categoria": "Suplemento",
+        "quantidade_gramas": 30.0,
+        "tipo_macro": "Proteína",
         "proteina_estimada_g": 24.0,
+        "proteina_g": 24.0,
+        "carboidrato_g": 2.0,
         "ordem": 3,
     },
     {
-        "titulo": "Creatina Growth (4 doses)",
+        "titulo": "Creatina Growth (5g)",
         "categoria": "Suplemento",
+        "quantidade_gramas": 5.0,
+        "tipo_macro": "Proteína",
         "proteina_estimada_g": 0.0,
+        "proteina_g": 0.0,
+        "carboidrato_g": 0.0,
         "ordem": 4,
     },
     {
         "titulo": "Refeição 1: Arroz, Feijão e Carne",
         "categoria": "Refeição",
+        "quantidade_gramas": 350.0,
+        "tipo_macro": "Proteína",
         "proteina_estimada_g": 45.0,
+        "proteina_g": 45.0,
+        "carboidrato_g": 55.0,
         "ordem": 5,
     },
     {
         "titulo": "Refeição 2: Macarrão/Arroz e Carne",
         "categoria": "Refeição",
+        "quantidade_gramas": 350.0,
+        "tipo_macro": "Proteína",
         "proteina_estimada_g": 45.0,
+        "proteina_g": 45.0,
+        "carboidrato_g": 60.0,
         "ordem": 6,
     },
 ]
@@ -88,14 +112,20 @@ ESTOQUE_INICIAL: list[dict[str, Any]] = [
     {
         "nome": "Creatina Growth",
         "unidade": "doses",
-        "quantidade_total": 80.0,
-        "quantidade_atual": 80.0,
-        "consumo_diario_padrao": 4.0,
+        "peso_total_g": 250.0,
+        "peso_restante_g": 250.0,
+        "dose_padrao_g": 5.0,
+        "quantidade_total": 50.0,
+        "quantidade_atual": 50.0,
+        "consumo_diario_padrao": 1.0,
         "alerta_minimo_percentual": 20.0,
     },
     {
         "nome": "Whey Protein Growth",
         "unidade": "doses",
+        "peso_total_g": 1000.0,
+        "peso_restante_g": 1000.0,
+        "dose_padrao_g": 30.0,
         "quantidade_total": 33.0,
         "quantidade_atual": 33.0,
         "consumo_diario_padrao": 1.0,
@@ -158,6 +188,51 @@ def init_db() -> None:
                     "REFERENCES lojas_suplementos(id) ON DELETE SET NULL"
                 )
             )
+        novas_colunas_estoque = [
+            ("peso_total_g", "FLOAT NOT NULL DEFAULT 300.0"),
+            ("peso_restante_g", "FLOAT NOT NULL DEFAULT 300.0"),
+            ("dose_padrao_g", "FLOAT NOT NULL DEFAULT 5.0"),
+        ]
+        for col_n, col_def in novas_colunas_estoque:
+            if col_n not in colunas_estoque:
+                session.execute(
+                    text(
+                        f"ALTER TABLE suplementos_estoque ADD COLUMN {col_n} {col_def}"
+                    )
+                )
+
+        colunas_checklist = {
+            str(row[1])
+            for row in session.execute(
+                text("PRAGMA table_info(itens_checklist_nutri)")
+            ).all()
+        }
+        novas_colunas_checklist = [
+            ("quantidade_gramas", "FLOAT NOT NULL DEFAULT 100.0"),
+            ("tipo_macro", "VARCHAR(30) NOT NULL DEFAULT 'Proteína'"),
+            ("proteina_g", "FLOAT NOT NULL DEFAULT 0.0"),
+            ("carboidrato_g", "FLOAT NOT NULL DEFAULT 0.0"),
+        ]
+        for col_n, col_def in novas_colunas_checklist:
+            if col_n not in colunas_checklist:
+                session.execute(
+                    text(
+                        f"ALTER TABLE itens_checklist_nutri ADD COLUMN {col_n} {col_def}"
+                    )
+                )
+
+        colunas_ficha_ex = {
+            str(row[1])
+            for row in session.execute(
+                text("PRAGMA table_info(ficha_exercicios)")
+            ).all()
+        }
+        if "observacoes" not in colunas_ficha_ex:
+            session.execute(
+                text(
+                    "ALTER TABLE ficha_exercicios ADD COLUMN observacoes VARCHAR(255)"
+                )
+            )
         session.flush()
         total_exercicios = session.scalar(select(func.count(Exercicio.id))) or 0
         if total_exercicios == 0:
@@ -218,11 +293,27 @@ def init_db() -> None:
                     ItemChecklistNutri(
                         titulo=str(item_n["titulo"]),
                         categoria=str(item_n["categoria"]),
+                        quantidade_gramas=float(item_n.get("quantidade_gramas", 100.0)),
+                        tipo_macro=str(item_n.get("tipo_macro", "Proteína")),
                         proteina_estimada_g=float(item_n["proteina_estimada_g"]),
+                        proteina_g=float(item_n.get("proteina_g", item_n["proteina_estimada_g"])),
+                        carboidrato_g=float(item_n.get("carboidrato_g", 0.0)),
                         ativo=True,
                         ordem=int(item_n["ordem"]),
                     )
                 )
+        else:
+            # Sincroniza proteina_g e tipo_macro nos itens antigos quando ainda zerados
+            itens_existentes = list(
+                session.scalars(select(ItemChecklistNutri)).all()
+            )
+            for it_ex in itens_existentes:
+                if it_ex.proteina_g == 0.0 and it_ex.proteina_estimada_g > 0.0:
+                    it_ex.proteina_g = float(it_ex.proteina_estimada_g)
+                if "cuscuz" in it_ex.titulo.lower() and it_ex.carboidrato_g == 0.0:
+                    it_ex.tipo_macro = "Carboidrato"
+                    it_ex.carboidrato_g = 45.0
+                    it_ex.quantidade_gramas = 180.0
 
         total_biometria = session.scalar(select(func.count(RegistroBiometria.id))) or 0
         if total_biometria == 0:
@@ -258,6 +349,9 @@ def init_db() -> None:
                     SuplementoEstoque(
                         nome=str(sup["nome"]),
                         unidade=str(sup["unidade"]),
+                        peso_total_g=float(sup["peso_total_g"]),
+                        peso_restante_g=float(sup["peso_restante_g"]),
+                        dose_padrao_g=float(sup["dose_padrao_g"]),
                         quantidade_total=float(sup["quantidade_total"]),
                         quantidade_atual=float(sup["quantidade_atual"]),
                         consumo_diario_padrao=float(sup["consumo_diario_padrao"]),
@@ -266,14 +360,16 @@ def init_db() -> None:
                         loja_id=growth_id,
                     )
                 )
-        elif growth_id is not None:
-            suplementos_sem_loja = list(
-                session.scalars(
-                    select(SuplementoEstoque).where(
-                        SuplementoEstoque.loja_id.is_(None),
-                        SuplementoEstoque.nome.ilike("%Growth%"),
-                    )
-                ).all()
-            )
-            for sup_item in suplementos_sem_loja:
-                sup_item.loja_id = growth_id
+        else:
+            todos_sups = list(session.scalars(select(SuplementoEstoque)).all())
+            for sup_item in todos_sups:
+                if growth_id is not None and sup_item.loja_id is None and "growth" in sup_item.nome.lower():
+                    sup_item.loja_id = growth_id
+                if "whey" in sup_item.nome.lower() and sup_item.peso_total_g == 300.0 and sup_item.dose_padrao_g == 5.0:
+                    sup_item.dose_padrao_g = 30.0
+                    sup_item.peso_total_g = round(float(sup_item.quantidade_total) * 30.0, 1)
+                    sup_item.peso_restante_g = round(float(sup_item.quantidade_atual) * 30.0, 1)
+                elif "creatina" in sup_item.nome.lower() and sup_item.peso_total_g == 300.0:
+                    sup_item.dose_padrao_g = 3.0 if sup_item.quantidade_total >= 80 else 5.0
+                    sup_item.peso_total_g = round(float(sup_item.quantidade_total) * float(sup_item.dose_padrao_g), 1)
+                    sup_item.peso_restante_g = round(float(sup_item.quantidade_atual) * float(sup_item.dose_padrao_g), 1)

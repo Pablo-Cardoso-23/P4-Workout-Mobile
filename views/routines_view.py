@@ -3,12 +3,14 @@ from typing import Any
 import flet as ft
 
 from services.workout_service import (
+    atualizar_ficha_exercicio,
     criar_exercicio,
     criar_ficha,
     excluir_ficha,
     listar_exercicios,
     listar_fichas,
     mover_exercicio_ficha,
+    renomear_ficha,
 )
 
 ORCELA_BLUE = "#007BFF"
@@ -81,7 +83,7 @@ def build_routines_view(page: ft.Page) -> ft.Control:
     form_exercicio_inline_visivel = False
 
     container_raiz = ft.Column(
-        scroll=ft.ScrollMode.AUTO,
+        scroll=ft.ScrollMode.HIDDEN,
         expand=True,
         spacing=16,
     )
@@ -264,6 +266,154 @@ def build_routines_view(page: ft.Page) -> ft.Control:
     def reordenar_exercicio_salvo(ficha_ex_id: int, direcao: str) -> None:
         mover_exercicio_ficha(ficha_ex_id, direcao)
         renderizar()
+
+    def abrir_dialogo_editar_ficha(
+        ficha_id: int, nome_atual: str, desc_atual: str | None
+    ) -> None:
+        tf_edit_nome = ft.TextField(
+            label="Nome da Ficha",
+            value=nome_atual,
+            border=construir_borda_input(),
+            color=PURE_WHITE,
+            text_size=14,
+        )
+        tf_edit_desc = ft.TextField(
+            label="Descrição / Foco (opcional)",
+            value=desc_atual or "",
+            border=construir_borda_input(),
+            color=PURE_WHITE,
+            text_size=13,
+        )
+
+        def _salvar_edicao_ficha(_: Any) -> None:
+            try:
+                renomear_ficha(
+                    ficha_id=ficha_id,
+                    novo_nome=tf_edit_nome.value or "",
+                    descricao=tf_edit_desc.value,
+                )
+                page.pop_dialog()
+                notificar("Ficha atualizada com sucesso!")
+                renderizar()
+            except Exception as exc:
+                notificar(str(exc), erro=True)
+
+        dlg_ficha = ft.AlertDialog(
+            bgcolor=CARD_BG,
+            shape=ft.RoundedRectangleBorder(
+                radius=14, side=ft.BorderSide(width=1, color=ORCELA_BORDER_HIGHLIGHT)
+            ),
+            title=ft.Text(
+                "Editar Ficha de Treino",
+                size=16,
+                weight=ft.FontWeight.BOLD,
+                color=PURE_WHITE,
+            ),
+            content=ft.Column(
+                tight=True,
+                spacing=10,
+                controls=[tf_edit_nome, tf_edit_desc],
+            ),
+            actions=[
+                ft.TextButton(
+                    content="Cancelar",
+                    on_click=lambda _: page.pop_dialog(),
+                ),
+                ft.Button(
+                    content="Salvar",
+                    bgcolor=ORCELA_BLUE,
+                    color=PURE_WHITE,
+                    on_click=_salvar_edicao_ficha,
+                ),
+            ],
+        )
+        page.show_dialog(dlg_ficha)
+
+    def abrir_dialogo_editar_exercicio_ficha(item_ficha: Any) -> None:
+        tf_ed_series = ft.TextField(
+            label="Séries Alvo",
+            value=str(item_ficha.series_alvo),
+            keyboard_type=ft.KeyboardType.NUMBER,
+            border=construir_borda_input(),
+            color=PURE_WHITE,
+            text_size=13,
+            expand=True,
+        )
+        tf_ed_reps = ft.TextField(
+            label="Repetições Alvo",
+            value=str(item_ficha.reps_alvo),
+            border=construir_borda_input(),
+            color=PURE_WHITE,
+            text_size=13,
+            expand=True,
+        )
+        tf_ed_descanso = ft.TextField(
+            label="Descanso (segundos)",
+            value=str(item_ficha.descanso_segundos),
+            keyboard_type=ft.KeyboardType.NUMBER,
+            border=construir_borda_input(),
+            color=PURE_WHITE,
+            text_size=13,
+        )
+        tf_ed_obs = ft.TextField(
+            label="Observações (ex: Cadência 3010, Pausa 2s)",
+            value=getattr(item_ficha, "observacoes", None) or "",
+            border=construir_borda_input(),
+            color=PURE_WHITE,
+            text_size=13,
+        )
+
+        def _salvar_edicao_item(_: Any) -> None:
+            try:
+                s_val = int(tf_ed_series.value or "4")
+                d_val = int(tf_ed_descanso.value or "90")
+                atualizar_ficha_exercicio(
+                    ficha_exercicio_id=item_ficha.id,
+                    series_alvo=s_val,
+                    reps_alvo=tf_ed_reps.value or "8-12",
+                    descanso_segundos=d_val,
+                    observacoes=tf_ed_obs.value,
+                )
+                page.pop_dialog()
+                notificar(f"'{item_ficha.exercicio.nome}' atualizado!")
+                renderizar()
+            except ValueError as exc:
+                notificar(str(exc), erro=True)
+
+        dlg_item = ft.AlertDialog(
+            bgcolor=CARD_BG,
+            shape=ft.RoundedRectangleBorder(
+                radius=14, side=ft.BorderSide(width=1, color=ORCELA_BORDER_HIGHLIGHT)
+            ),
+            title=ft.Text(
+                f"Editar • {item_ficha.exercicio.nome}",
+                size=15,
+                weight=ft.FontWeight.BOLD,
+                color=PURE_WHITE,
+            ),
+            content=ft.Column(
+                tight=True,
+                spacing=10,
+                controls=[
+                    ft.Row(spacing=8, controls=[tf_ed_series, tf_ed_reps]),
+                    tf_ed_descanso,
+                    tf_ed_obs,
+                ],
+            ),
+            actions=[
+                ft.TextButton(
+                    content="Cancelar",
+                    on_click=lambda _: page.pop_dialog(),
+                ),
+                ft.Button(
+                    content="Salvar",
+                    bgcolor=ORCELA_BLUE,
+                    color=PURE_WHITE,
+                    on_click=_salvar_edicao_item,
+                ),
+            ],
+        )
+        page.show_dialog(dlg_item)
 
     def salvar_ficha_completa(_: Any = None) -> None:
         nonlocal form_ficha_visivel, form_exercicio_inline_visivel
@@ -604,31 +754,47 @@ def build_routines_view(page: ft.Page) -> ft.Control:
                 for idx_it, item in enumerate(ficha.itens):
                     eh_primeiro = idx_it == 0
                     eh_ultimo = idx_it == total_itens_ficha - 1
+                    obs_txt = getattr(item, "observacoes", None)
+                    bloco_texto_ex: list[ft.Control] = [
+                        ft.Text(
+                            size=13,
+                            spans=[
+                                ft.TextSpan(
+                                    f"{idx_it + 1}. ",
+                                    ft.TextStyle(
+                                        color=ORCELA_BLUE,
+                                        weight=ft.FontWeight.BOLD,
+                                    ),
+                                ),
+                                ft.TextSpan(
+                                    item.exercicio.nome,
+                                    ft.TextStyle(
+                                        color=PURE_WHITE,
+                                        weight=ft.FontWeight.W_500,
+                                    ),
+                                ),
+                            ],
+                        )
+                    ]
+                    if obs_txt:
+                        bloco_texto_ex.append(
+                            ft.Text(
+                                obs_txt,
+                                size=11,
+                                color=TEXT_MUTED,
+                            )
+                        )
+
                     linhas_ex.append(
                         ft.Row(
                             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                             vertical_alignment=ft.CrossAxisAlignment.CENTER,
                             spacing=4,
                             controls=[
-                                ft.Text(
-                                    size=13,
+                                ft.Column(
+                                    spacing=1,
                                     expand=True,
-                                    spans=[
-                                        ft.TextSpan(
-                                            f"{idx_it + 1}. ",
-                                            ft.TextStyle(
-                                                color=ORCELA_BLUE,
-                                                weight=ft.FontWeight.BOLD,
-                                            ),
-                                        ),
-                                        ft.TextSpan(
-                                            item.exercicio.nome,
-                                            ft.TextStyle(
-                                                color=PURE_WHITE,
-                                                weight=ft.FontWeight.W_500,
-                                            ),
-                                        ),
-                                    ],
+                                    controls=bloco_texto_ex,
                                 ),
                                 ft.Container(
                                     bgcolor=ORCELA_DARK_SURFACE,
@@ -647,10 +813,21 @@ def build_routines_view(page: ft.Page) -> ft.Control:
                                     spacing=0,
                                     controls=[
                                         ft.IconButton(
+                                            icon=ft.Icons.EDIT_ROUNDED,
+                                            icon_size=16,
+                                            width=28,
+                                            height=28,
+                                            icon_color=ORCELA_BLUE,
+                                            tooltip="Editar séries, reps e descanso",
+                                            on_click=lambda _, it=item: abrir_dialogo_editar_exercicio_ficha(
+                                                it
+                                            ),
+                                        ),
+                                        ft.IconButton(
                                             icon=ft.Icons.KEYBOARD_ARROW_UP_ROUNDED,
                                             icon_size=18,
-                                            width=30,
-                                            height=30,
+                                            width=28,
+                                            height=28,
                                             disabled=eh_primeiro,
                                             icon_color=SURFACE_BORDER
                                             if eh_primeiro
@@ -663,8 +840,8 @@ def build_routines_view(page: ft.Page) -> ft.Control:
                                         ft.IconButton(
                                             icon=ft.Icons.KEYBOARD_ARROW_DOWN_ROUNDED,
                                             icon_size=18,
-                                            width=30,
-                                            height=30,
+                                            width=28,
+                                            height=28,
                                             disabled=eh_ultimo,
                                             icon_color=SURFACE_BORDER
                                             if eh_ultimo
@@ -687,6 +864,8 @@ def build_routines_view(page: ft.Page) -> ft.Control:
                         shadow=construir_sombra_orcela(),
                         border_radius=14,
                         padding=16,
+                        animate_opacity=ft.Animation(300, ft.AnimationCurve.EASE_OUT),
+                        animate_scale=ft.Animation(300, ft.AnimationCurve.EASE_OUT_BACK),
                         content=ft.Column(
                             spacing=10,
                             controls=[
@@ -710,13 +889,26 @@ def build_routines_view(page: ft.Page) -> ft.Control:
                                                 ),
                                             ],
                                         ),
-                                        ft.IconButton(
-                                            icon=ft.Icons.DELETE_OUTLINE_ROUNDED,
-                                            icon_color=DANGER_RED,
-                                            tooltip="Excluir Ficha",
-                                            on_click=lambda _, fid=ficha.id, fnome=ficha.nome: deletar_ficha_existente(
-                                                fid, fnome
-                                            ),
+                                        ft.Row(
+                                            spacing=2,
+                                            controls=[
+                                                ft.IconButton(
+                                                    icon=ft.Icons.EDIT_ROUNDED,
+                                                    icon_color=ORCELA_BLUE,
+                                                    tooltip="Editar nome e descrição da ficha",
+                                                    on_click=lambda _, fid=ficha.id, fn=ficha.nome, fd=ficha.descricao: abrir_dialogo_editar_ficha(
+                                                        fid, fn, fd
+                                                    ),
+                                                ),
+                                                ft.IconButton(
+                                                    icon=ft.Icons.DELETE_OUTLINE_ROUNDED,
+                                                    icon_color=DANGER_RED,
+                                                    tooltip="Excluir Ficha",
+                                                    on_click=lambda _, fid=ficha.id, fnome=ficha.nome: deletar_ficha_existente(
+                                                        fid, fnome
+                                                    ),
+                                                ),
+                                            ],
                                         ),
                                     ],
                                 ),

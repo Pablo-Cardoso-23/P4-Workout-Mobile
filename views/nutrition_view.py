@@ -11,15 +11,19 @@ from models.nutrition_models import (
     SuplementoEstoque,
 )
 from services.nutrition_service import (
+    TIPOS_MACRO_VALIDOS,
     adicionar_agua,
     adicionar_proteina_avulsa,
     alternar_check_item,
+    atualizar_item_checklist,
     atualizar_metas,
+    atualizar_suplemento_estoque,
     consumir_suplemento,
     criar_item_checklist,
     criar_loja_suplemento,
     criar_suplemento_estoque,
     excluir_loja_suplemento,
+    formatar_rotulo_macro_item,
     listar_estoque_suplementos,
     listar_lojas_suplementos,
     obter_ou_criar_dia,
@@ -55,7 +59,7 @@ def _formatar_label_data(data_ref: date) -> str:
 
 
 def build_nutrition_view(page: ft.Page) -> ft.Control:
-    """Constrói a view modular de Nutrição, Hidratação, Estoque e Lojas Favoritas."""
+    """Constrói a view modular de Nutrição, Hidratação, Estoque por Gramatura e Macros."""
     data_selecionada: date = date.today()
     form_metas_visivel: bool = False
     form_lojas_visivel: bool = False
@@ -63,7 +67,7 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
     form_novo_suplemento_visivel: bool = False
 
     container_raiz = ft.Column(
-        scroll=ft.ScrollMode.AUTO,
+        scroll=ft.ScrollMode.HIDDEN,
         expand=True,
         spacing=16,
     )
@@ -161,8 +165,9 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
         expand=True,
     )
 
+    # Controles do Checklist Diário com Porção (g) e Tipo de Macro
     tf_item_titulo = ft.TextField(
-        label="Nome do Suplemento ou Refeição",
+        label="Alimento / Suplemento (ex: Macarrão, Frango, Whey)",
         border=construir_borda_input(),
         color=PURE_WHITE,
         text_size=13,
@@ -178,9 +183,28 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
             ft.dropdown.Option(key="Suplemento", text="Suplemento"),
         ],
     )
-    tf_item_proteina = ft.TextField(
-        label="Proteína (g)",
-        value="20",
+    tf_item_porcao_g = ft.TextField(
+        label="Porção (g)",
+        value="150",
+        keyboard_type=ft.KeyboardType.NUMBER,
+        border=construir_borda_input(),
+        color=PURE_WHITE,
+        text_size=13,
+        width=110,
+    )
+    dd_item_tipo_macro = ft.Dropdown(
+        label="Macro Principal",
+        value="Proteína",
+        border=construir_borda_input(),
+        color=PURE_WHITE,
+        expand=True,
+        options=[
+            ft.dropdown.Option(key=m, text=m) for m in TIPOS_MACRO_VALIDOS
+        ],
+    )
+    tf_item_valor_macro = ft.TextField(
+        label="Qtd Macro (g)",
+        value="30",
         keyboard_type=ft.KeyboardType.NUMBER,
         border=construir_borda_input(),
         color=PURE_WHITE,
@@ -188,41 +212,39 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
         width=120,
     )
 
+    # Controles de Estoque por Gramatura (Peso Total em g + Dose em g)
     tf_sup_nome = ft.TextField(
-        label="Nome do Suplemento (ex: Pré-Treino Growth)",
+        label="Nome do Suplemento (ex: Creatina Growth 300g)",
         border=construir_borda_input(),
         color=PURE_WHITE,
         text_size=13,
     )
-    dd_sup_unidade = ft.Dropdown(
-        label="Unidade",
-        value="doses",
-        border=construir_borda_input(),
-        color=PURE_WHITE,
-        width=110,
-        options=[
-            ft.dropdown.Option(key="doses", text="doses"),
-            ft.dropdown.Option(key="g", text="g"),
-            ft.dropdown.Option(key="caps", text="caps"),
-        ],
-    )
-    tf_sup_total = ft.TextField(
-        label="Qtd Total Pote",
-        value="60",
+    tf_sup_peso_total = ft.TextField(
+        label="Peso Total (g)",
+        value="300",
         keyboard_type=ft.KeyboardType.NUMBER,
         border=construir_borda_input(),
         color=PURE_WHITE,
         text_size=13,
         expand=True,
     )
+    tf_sup_dose_g = ft.TextField(
+        label="Dose (g)",
+        value="5",
+        keyboard_type=ft.KeyboardType.NUMBER,
+        border=construir_borda_input(),
+        color=PURE_WHITE,
+        text_size=13,
+        width=95,
+    )
     tf_sup_consumo = ft.TextField(
-        label="Uso/Dia",
+        label="Doses/Dia",
         value="1",
         keyboard_type=ft.KeyboardType.NUMBER,
         border=construir_borda_input(),
         color=PURE_WHITE,
         text_size=13,
-        width=90,
+        width=95,
     )
     dd_sup_loja = ft.Dropdown(
         label="Loja Preferencial de Reposição",
@@ -296,39 +318,274 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
     def salvar_novo_item(_: Any = None) -> None:
         nonlocal form_novo_item_visivel
         try:
-            prot_val = float((tf_item_proteina.value or "0").replace(",", "."))
+            porcao_v = float((tf_item_porcao_g.value or "100").replace(",", "."))
+            macro_v = float((tf_item_valor_macro.value or "0").replace(",", "."))
+            tipo_m = dd_item_tipo_macro.value or "Proteína"
             novo = criar_item_checklist(
                 titulo=tf_item_titulo.value or "",
                 categoria=dd_item_categoria.value or "Refeição",
-                proteina_estimada_g=prot_val,
+                quantidade_gramas=porcao_v,
+                tipo_macro=tipo_m,
+                valor_macro_g=macro_v,
             )
             tf_item_titulo.value = ""
-            tf_item_proteina.value = "20"
+            tf_item_porcao_g.value = "150"
+            tf_item_valor_macro.value = "30"
             form_novo_item_visivel = False
             notificar(f"Item '{novo.titulo}' adicionado ao checklist!")
             renderizar(atualizar_pagina=True)
         except Exception as exc:
             notificar(str(exc), erro=True)
 
+    def abrir_dialogo_editar_item_checklist(item_obj: Any) -> None:
+        tf_ed_tit = ft.TextField(
+            label="Alimento / Suplemento",
+            value=str(item_obj.titulo),
+            border=construir_borda_input(),
+            color=PURE_WHITE,
+            text_size=13,
+        )
+        dd_ed_cat = ft.Dropdown(
+            label="Categoria",
+            value=str(item_obj.categoria),
+            border=construir_borda_input(),
+            color=PURE_WHITE,
+            expand=True,
+            options=[
+                ft.dropdown.Option(key="Refeição", text="Refeição"),
+                ft.dropdown.Option(key="Suplemento", text="Suplemento"),
+            ],
+        )
+        tf_ed_porcao = ft.TextField(
+            label="Porção (g)",
+            value=f"{getattr(item_obj, 'quantidade_gramas', 100.0):g}",
+            keyboard_type=ft.KeyboardType.NUMBER,
+            border=construir_borda_input(),
+            color=PURE_WHITE,
+            text_size=13,
+            width=110,
+        )
+        tipo_atual = str(getattr(item_obj, "tipo_macro", "Proteína") or "Proteína")
+        dd_ed_macro = ft.Dropdown(
+            label="Macro Principal",
+            value=tipo_atual if tipo_atual in TIPOS_MACRO_VALIDOS else "Proteína",
+            border=construir_borda_input(),
+            color=PURE_WHITE,
+            expand=True,
+            options=[
+                ft.dropdown.Option(key=m, text=m) for m in TIPOS_MACRO_VALIDOS
+            ],
+        )
+        val_macro_atual = (
+            float(getattr(item_obj, "proteina_g", 0.0) or item_obj.proteina_estimada_g)
+            if tipo_atual == "Proteína"
+            else float(getattr(item_obj, "carboidrato_g", 0.0) or item_obj.proteina_estimada_g)
+        )
+        tf_ed_val_macro = ft.TextField(
+            label="Qtd Macro (g)",
+            value=f"{val_macro_atual:g}",
+            keyboard_type=ft.KeyboardType.NUMBER,
+            border=construir_borda_input(),
+            color=PURE_WHITE,
+            text_size=13,
+            width=110,
+        )
+
+        def _confirmar_edicao_item(_: Any) -> None:
+            try:
+                p_val = float((tf_ed_porcao.value or "100").replace(",", "."))
+                m_val = float((tf_ed_val_macro.value or "0").replace(",", "."))
+                atualizar_item_checklist(
+                    item_id=item_obj.id,
+                    titulo=tf_ed_tit.value or "",
+                    categoria=dd_ed_cat.value or "Refeição",
+                    quantidade_gramas=p_val,
+                    tipo_macro=dd_ed_macro.value or "Proteína",
+                    valor_macro_g=m_val,
+                )
+                page.pop_dialog()
+                notificar("Item do checklist atualizado!")
+                renderizar(atualizar_pagina=True)
+            except Exception as exc:
+                notificar(str(exc), erro=True)
+
+        dlg_ed_item = ft.AlertDialog(
+            bgcolor=CARD_BG,
+            shape=ft.RoundedRectangleBorder(
+                radius=14, side=ft.BorderSide(width=1, color=ORCELA_BORDER_HIGHLIGHT)
+            ),
+            title=ft.Text(
+                "Editar Item do Checklist",
+                size=15,
+                weight=ft.FontWeight.BOLD,
+                color=PURE_WHITE,
+            ),
+            content=ft.Column(
+                tight=True,
+                spacing=10,
+                controls=[
+                    tf_ed_tit,
+                    ft.Row(spacing=8, controls=[dd_ed_cat, tf_ed_porcao]),
+                    ft.Row(spacing=8, controls=[dd_ed_macro, tf_ed_val_macro]),
+                ],
+            ),
+            actions=[
+                ft.TextButton(
+                    content="Cancelar",
+                    on_click=lambda _: page.pop_dialog(),
+                ),
+                ft.Button(
+                    content="Salvar",
+                    bgcolor=ORCELA_BLUE,
+                    color=PURE_WHITE,
+                    on_click=_confirmar_edicao_item,
+                ),
+            ],
+        )
+        page.show_dialog(dlg_ed_item)
+
     def salvar_novo_suplemento(_: Any = None) -> None:
         nonlocal form_novo_suplemento_visivel
         try:
-            qtd_tot = float((tf_sup_total.value or "60").replace(",", "."))
+            peso_tot = float((tf_sup_peso_total.value or "300").replace(",", "."))
+            dose_g = float((tf_sup_dose_g.value or "5").replace(",", "."))
             uso_dia = float((tf_sup_consumo.value or "1").replace(",", "."))
             lid = int(dd_sup_loja.value) if dd_sup_loja.value else None
             novo = criar_suplemento_estoque(
                 nome=tf_sup_nome.value or "",
-                unidade=dd_sup_unidade.value or "doses",
-                quantidade_total=qtd_tot,
+                unidade="doses",
+                peso_total_g=peso_tot,
+                dose_padrao_g=dose_g,
                 consumo_diario_padrao=uso_dia,
                 loja_id=lid,
             )
             tf_sup_nome.value = ""
             form_novo_suplemento_visivel = False
-            notificar(f"Suplemento '{novo.nome}' adicionado ao estoque!")
+            notificar(
+                f"'{novo.nome}' salvo ({peso_tot:g}g • {int(round(peso_tot / dose_g))} doses de {dose_g:g}g)!"
+            )
             renderizar(atualizar_pagina=True)
         except Exception as exc:
             notificar(str(exc), erro=True)
+
+    def abrir_dialogo_editar_suplemento(
+        sup_obj: SuplementoEstoque, lojas_disp: list[Any]
+    ) -> None:
+        tf_ed_snome = ft.TextField(
+            label="Nome do Suplemento",
+            value=sup_obj.nome,
+            border=construir_borda_input(),
+            color=PURE_WHITE,
+            text_size=13,
+        )
+        tf_ed_ptot = ft.TextField(
+            label="Peso Total (g)",
+            value=f"{sup_obj.peso_total_g:g}",
+            keyboard_type=ft.KeyboardType.NUMBER,
+            border=construir_borda_input(),
+            color=PURE_WHITE,
+            text_size=13,
+            expand=True,
+        )
+        tf_ed_prest = ft.TextField(
+            label="Restante (g)",
+            value=f"{sup_obj.peso_restante_g:g}",
+            keyboard_type=ft.KeyboardType.NUMBER,
+            border=construir_borda_input(),
+            color=PURE_WHITE,
+            text_size=13,
+            expand=True,
+        )
+        tf_ed_dose = ft.TextField(
+            label="Dose (g)",
+            value=f"{sup_obj.dose_padrao_g:g}",
+            keyboard_type=ft.KeyboardType.NUMBER,
+            border=construir_borda_input(),
+            color=PURE_WHITE,
+            text_size=13,
+            expand=True,
+        )
+        tf_ed_uso = ft.TextField(
+            label="Doses/Dia",
+            value=f"{sup_obj.consumo_diario_padrao:g}",
+            keyboard_type=ft.KeyboardType.NUMBER,
+            border=construir_borda_input(),
+            color=PURE_WHITE,
+            text_size=13,
+            expand=True,
+        )
+        dd_ed_loja = ft.Dropdown(
+            label="Loja Preferencial",
+            value=str(sup_obj.loja_id or 0),
+            border=construir_borda_input(),
+            color=PURE_WHITE,
+            expand=True,
+            options=[
+                ft.dropdown.Option(key="0", text="Sem loja vinculada"),
+                *[
+                    ft.dropdown.Option(key=str(lj.id), text=lj.nome)
+                    for lj in lojas_disp
+                ],
+            ],
+        )
+
+        def _confirmar_edicao_sup(_: Any) -> None:
+            try:
+                pt = float((tf_ed_ptot.value or "300").replace(",", "."))
+                pr = float((tf_ed_prest.value or "300").replace(",", "."))
+                dg = float((tf_ed_dose.value or "5").replace(",", "."))
+                ud = float((tf_ed_uso.value or "1").replace(",", "."))
+                lid = int(dd_ed_loja.value or "0")
+                atualizar_suplemento_estoque(
+                    suplemento_id=sup_obj.id,
+                    nome=tf_ed_snome.value or "",
+                    peso_total_g=pt,
+                    peso_restante_g=pr,
+                    dose_padrao_g=dg,
+                    consumo_diario_padrao=ud,
+                    loja_id=lid if lid > 0 else None,
+                )
+                page.pop_dialog()
+                notificar(f"Suplemento '{tf_ed_snome.value}' atualizado!")
+                renderizar(atualizar_pagina=True)
+            except Exception as exc:
+                notificar(str(exc), erro=True)
+
+        dlg_sup = ft.AlertDialog(
+            bgcolor=CARD_BG,
+            shape=ft.RoundedRectangleBorder(
+                radius=14, side=ft.BorderSide(width=1, color=ORCELA_BORDER_HIGHLIGHT)
+            ),
+            title=ft.Text(
+                "Editar Pote de Suplemento",
+                size=15,
+                weight=ft.FontWeight.BOLD,
+                color=PURE_WHITE,
+            ),
+            content=ft.Column(
+                tight=True,
+                spacing=10,
+                controls=[
+                    tf_ed_snome,
+                    ft.Row(spacing=8, controls=[tf_ed_ptot, tf_ed_prest]),
+                    ft.Row(spacing=8, controls=[tf_ed_dose, tf_ed_uso]),
+                    ft.Row(controls=[dd_ed_loja]),
+                ],
+            ),
+            actions=[
+                ft.TextButton(
+                    content="Cancelar",
+                    on_click=lambda _: page.pop_dialog(),
+                ),
+                ft.Button(
+                    content="Salvar",
+                    bgcolor=ORCELA_BLUE,
+                    color=PURE_WHITE,
+                    on_click=_confirmar_edicao_sup,
+                ),
+            ],
+        )
+        page.show_dialog(dlg_sup)
 
     def acao_check_item(check_id: int) -> None:
         alternar_check_item(check_id)
@@ -835,7 +1092,7 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
             )
         )
 
-        # Seção Estoque Inteligente de Suplementos
+        # Seção Estoque Inteligente de Suplementos (Gramatura & Doses)
         controles.append(
             ft.Row(
                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
@@ -876,7 +1133,7 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
                                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                                 controls=[
                                     ft.Text(
-                                        "Cadastrar Pote no Estoque",
+                                        "Cadastrar Pote por Gramatura",
                                         size=15,
                                         weight=ft.FontWeight.BOLD,
                                         color=PURE_WHITE,
@@ -893,8 +1150,8 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
                             ft.Row(
                                 spacing=8,
                                 controls=[
-                                    tf_sup_total,
-                                    dd_sup_unidade,
+                                    tf_sup_peso_total,
+                                    tf_sup_dose_g,
                                     tf_sup_consumo,
                                 ],
                             ),
@@ -917,6 +1174,10 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
 
         for info_sup in estoque_lista:
             sup: SuplementoEstoque = info_sup["suplemento"]
+            peso_rest_g: float = info_sup["peso_restante_g"]
+            peso_tot_g: float = info_sup["peso_total_g"]
+            dose_g: float = info_sup["dose_padrao_g"]
+            doses_rest: int = info_sup["doses_restantes"]
             perc: float = info_sup["percentual_restante"]
             prop_sup: float = info_sup["proporcao"]
             dias_rest: int = info_sup["dias_restantes"]
@@ -942,6 +1203,7 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
             controles_card_sup: list[ft.Control] = [
                 ft.Row(
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    vertical_alignment=ft.CrossAxisAlignment.START,
                     controls=[
                         ft.Column(
                             spacing=2,
@@ -954,26 +1216,43 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
                                     color=PURE_WHITE,
                                 ),
                                 ft.Text(
-                                    f"Restam {sup.quantidade_atual:g} / {sup.quantidade_total:g} {sup.unidade} ({perc:.0f}%) • ~{dias_rest} dias{subtitulo_loja}",
+                                    f"{peso_rest_g:g}g / {peso_tot_g:g}g ({doses_rest} doses de {dose_g:g}g) • {perc:.0f}%{subtitulo_loja}",
                                     size=11,
-                                    color=TEXT_MUTED,
+                                    color=ORCELA_BLUE,
+                                    weight=ft.FontWeight.W_500,
                                 ),
                             ],
                         ),
-                        ft.Container(
-                            bgcolor=bg_badge,
-                            padding=ft.Padding.symmetric(
-                                horizontal=8, vertical=4
-                            ),
-                            border_radius=6,
-                            content=ft.Text(
-                                texto_badge,
-                                size=10,
-                                weight=ft.FontWeight.BOLD,
-                                color=cor_barra
-                                if status != "OK"
-                                else PURE_WHITE,
-                            ),
+                        ft.Row(
+                            spacing=4,
+                            controls=[
+                                ft.Container(
+                                    bgcolor=bg_badge,
+                                    padding=ft.Padding.symmetric(
+                                        horizontal=8, vertical=4
+                                    ),
+                                    border_radius=6,
+                                    content=ft.Text(
+                                        texto_badge,
+                                        size=10,
+                                        weight=ft.FontWeight.BOLD,
+                                        color=cor_barra
+                                        if status != "OK"
+                                        else PURE_WHITE,
+                                    ),
+                                ),
+                                ft.IconButton(
+                                    icon=ft.Icons.EDIT_ROUNDED,
+                                    icon_color=ORCELA_BLUE,
+                                    icon_size=18,
+                                    width=30,
+                                    height=30,
+                                    tooltip="Editar gramatura e dose",
+                                    on_click=lambda _, s_obj=sup: abrir_dialogo_editar_suplemento(
+                                        s_obj, lojas_cadastradas
+                                    ),
+                                ),
+                            ],
                         ),
                     ],
                 ),
@@ -988,15 +1267,21 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                     controls=[
                         ft.Text(
-                            f"Uso diário: {sup.consumo_diario_padrao:g} {sup.unidade}/dia",
+                            f"Uso: {sup.consumo_diario_padrao:g} dose(s)/dia (~{dias_rest} dias restantes)",
                             size=11,
                             color=TEXT_MUTED,
+                            expand=True,
                         ),
                         ft.Row(
                             spacing=6,
                             controls=[
                                 ft.OutlinedButton(
-                                    content="-1 Dose",
+                                    content=f"-1 Dose ({dose_g:g}g)",
+                                    style=ft.ButtonStyle(
+                                        padding=ft.Padding.symmetric(
+                                            horizontal=10, vertical=4
+                                        ),
+                                    ),
                                     on_click=lambda _, sid=sup.id: acao_consumir_estoque(
                                         sid
                                     ),
@@ -1052,7 +1337,7 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
                 spacing=8,
                 controls=[
                     ft.Text(
-                        "CHECKLIST DIÁRIO",
+                        "CHECKLIST DIÁRIO (PORÇÕES & MACROS)",
                         size=12,
                         weight=ft.FontWeight.BOLD,
                         color=TEXT_MUTED,
@@ -1085,7 +1370,7 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
                                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                                 controls=[
                                     ft.Text(
-                                        "Novo Item Recorrente",
+                                        "Novo Item (Porção & Macronutriente)",
                                         size=15,
                                         weight=ft.FontWeight.BOLD,
                                         color=PURE_WHITE,
@@ -1101,7 +1386,11 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
                             tf_item_titulo,
                             ft.Row(
                                 spacing=8,
-                                controls=[dd_item_categoria, tf_item_proteina],
+                                controls=[dd_item_categoria, tf_item_porcao_g],
+                            ),
+                            ft.Row(
+                                spacing=8,
+                                controls=[dd_item_tipo_macro, tf_item_valor_macro],
                             ),
                             ft.Button(
                                 content="ADICIONAR AO CHECKLIST",
@@ -1122,11 +1411,7 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
         for chk in checks:
             item = chk.item
             marcado = bool(chk.concluido)
-            badge_prot = (
-                f"+{item.proteina_estimada_g:.0f}g prot"
-                if item.proteina_estimada_g > 0
-                else item.categoria
-            )
+            badge_macro = formatar_rotulo_macro_item(item)
 
             controles.append(
                 ft.Container(
@@ -1136,12 +1421,18 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
                     ),
                     shadow=construir_sombra_orcela(),
                     border_radius=12,
-                    padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+                    padding=ft.Padding.symmetric(horizontal=10, vertical=10),
+                    scale=1.0,
+                    animate=ft.Animation(200, ft.AnimationCurve.EASE_OUT),
+                    animate_opacity=ft.Animation(300, ft.AnimationCurve.EASE_OUT),
+                    animate_scale=ft.Animation(300, ft.AnimationCurve.EASE_OUT_BACK),
                     content=ft.Row(
                         alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        spacing=6,
                         controls=[
                             ft.Row(
-                                spacing=8,
+                                spacing=6,
                                 expand=True,
                                 controls=[
                                     ft.Checkbox(
@@ -1163,25 +1454,24 @@ def build_nutrition_view(page: ft.Page) -> ft.Control:
                                                 color=PURE_WHITE,
                                             ),
                                             ft.Text(
-                                                item.categoria,
+                                                f"{item.categoria} • {badge_macro}",
                                                 size=11,
-                                                color=TEXT_MUTED,
+                                                color=ORCELA_BLUE,
+                                                weight=ft.FontWeight.W_500,
                                             ),
                                         ],
                                     ),
                                 ],
                             ),
-                            ft.Container(
-                                bgcolor=DARK_BG,
-                                padding=ft.Padding.symmetric(
-                                    horizontal=8, vertical=4
-                                ),
-                                border_radius=6,
-                                content=ft.Text(
-                                    badge_prot,
-                                    size=11,
-                                    weight=ft.FontWeight.BOLD,
-                                    color=ORCELA_BLUE,
+                            ft.IconButton(
+                                icon=ft.Icons.EDIT_ROUNDED,
+                                icon_color=ORCELA_BLUE,
+                                icon_size=18,
+                                width=30,
+                                height=30,
+                                tooltip="Editar porção e macronutriente",
+                                on_click=lambda _, it_obj=item: abrir_dialogo_editar_item_checklist(
+                                    it_obj
                                 ),
                             ),
                         ],

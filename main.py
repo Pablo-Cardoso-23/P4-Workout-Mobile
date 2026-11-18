@@ -29,9 +29,22 @@ def main(page: ft.Page) -> None:
     page.bgcolor = DARK_BG
     page.padding = 0
 
-    page.theme = ft.Theme(
+    tema_app = ft.Theme(
         color_scheme_seed=ORCELA_BLUE,
         scaffold_bgcolor=DARK_BG,
+        scrollbar_theme=ft.ScrollbarTheme(thickness=0.0, radius=0),
+    )
+    page.theme = tema_app
+    page.dark_theme = tema_app
+
+    switcher_abas = ft.AnimatedSwitcher(
+        content=ft.Container(expand=True),
+        expand=True,
+        transition=ft.AnimatedSwitcherTransition.FADE,
+        duration=250,
+        reverse_duration=150,
+        switch_in_curve=ft.AnimationCurve.EASE_OUT,
+        switch_out_curve=ft.AnimationCurve.EASE_IN,
     )
 
     conteudo_principal = ft.Container(
@@ -39,20 +52,26 @@ def main(page: ft.Page) -> None:
         padding=ft.Padding.symmetric(horizontal=16, vertical=20),
         opacity=1.0,
         animate_opacity=ft.Animation(250, ft.AnimationCurve.EASE_OUT),
+        content=switcher_abas,
     )
 
     def ao_trocar_aba(evento: ft.Event[ft.NavigationBar]) -> None:
         indice = evento.control.selected_index
         if indice == 0:
-            conteudo_principal.content = build_train_view(page)
+            nova_view = build_train_view(page)
         elif indice == 1:
-            conteudo_principal.content = build_cardio_view(page)
+            nova_view = build_cardio_view(page)
         elif indice == 2:
-            conteudo_principal.content = build_routines_view(page)
+            nova_view = build_routines_view(page)
         elif indice == 3:
-            conteudo_principal.content = build_stats_view(page)
+            nova_view = build_stats_view(page)
         else:
-            conteudo_principal.content = build_nutrition_view(page)
+            nova_view = build_nutrition_view(page)
+        switcher_abas.content = ft.Container(
+            key=f"tab_{indice}",
+            expand=True,
+            content=nova_view,
+        )
         page.update()
 
     barra_navegacao = ft.NavigationBar(
@@ -144,7 +163,7 @@ def main(page: ft.Page) -> None:
                     color=PURE_WHITE,
                 ),
                 ft.Text(
-                    "PERFORMANCE & ORGANIZATION",
+                    "PERFORMANCE & HYPERTROPHY",
                     size=10,
                     weight=ft.FontWeight.BOLD,
                     color=TEXT_MUTED,
@@ -177,7 +196,11 @@ def main(page: ft.Page) -> None:
         page.update()
 
         await asyncio.sleep(0.3)
-        conteudo_principal.content = build_train_view(page)
+        switcher_abas.content = ft.Container(
+            key="tab_0",
+            expand=True,
+            content=build_train_view(page),
+        )
         raiz_safe_area.content = conteudo_principal
         page.navigation_bar = barra_navegacao
         page.update()
