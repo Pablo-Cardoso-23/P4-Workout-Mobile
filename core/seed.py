@@ -13,7 +13,7 @@ from models.nutrition_models import (
     RegistroDiarioNutri,
     SuplementoEstoque,
 )
-from models.workout_models import Exercicio, Ficha, FichaExercicio
+from models.workout_models import Exercicio, Ficha, FichaExercicio, SerieExecutada
 
 CATALOGO_INICIAL: list[dict[str, str]] = [
     # Peito
@@ -233,6 +233,34 @@ def init_db() -> None:
                     "ALTER TABLE ficha_exercicios ADD COLUMN observacoes VARCHAR(255)"
                 )
             )
+
+        # Limpeza segura de eventual erro de digitação 'Desenvolvimento com Haleres'
+        ex_errado = session.scalar(
+            select(Exercicio).where(Exercicio.nome == "Desenvolvimento com Haleres")
+        )
+        if ex_errado is not None:
+            ex_correto = session.scalar(
+                select(Exercicio).where(
+                    Exercicio.nome == "Desenvolvimento com Halteres"
+                )
+            )
+            if ex_correto is not None and ex_correto.id != ex_errado.id:
+                for fe in session.scalars(
+                    select(FichaExercicio).where(
+                        FichaExercicio.exercicio_id == ex_errado.id
+                    )
+                ).all():
+                    fe.exercicio_id = ex_correto.id
+                for se in session.scalars(
+                    select(SerieExecutada).where(
+                        SerieExecutada.exercicio_id == ex_errado.id
+                    )
+                ).all():
+                    se.exercicio_id = ex_correto.id
+                session.flush()
+                session.delete(ex_errado)
+            else:
+                ex_errado.nome = "Desenvolvimento com Halteres"
         session.flush()
         total_exercicios = session.scalar(select(func.count(Exercicio.id))) or 0
         if total_exercicios == 0:

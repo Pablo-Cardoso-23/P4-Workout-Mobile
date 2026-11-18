@@ -290,11 +290,205 @@ def build_stats_view(page: ft.Page) -> ft.Control:
             )
         )
 
-    dd_seletor_exercicio = ft.Dropdown(
-        label="Analisar Exercício",
-        border=construir_borda_input(),
+    txt_ex_analise_titulo = ft.Text(
+        "Selecionar Exercício...",
+        size=13,
+        weight=ft.FontWeight.BOLD,
         color=PURE_WHITE,
         expand=True,
+        max_lines=1,
+        overflow=ft.TextOverflow.ELLIPSIS,
+    )
+    txt_ex_analise_sub = ft.Text(
+        "Toque para buscar no catálogo",
+        size=11,
+        color=ORCELA_BLUE,
+    )
+
+    def abrir_modal_analise_exercicio(_: Any = None) -> None:
+        nonlocal exercicio_selecionado_id
+        exercicios_disp = listar_exercicios_para_analise()
+        lista_filtrada = ft.ListView(
+            height=260,
+            spacing=4,
+        )
+
+        def _selecionar_ex_analise(ex_obj: Any) -> None:
+            nonlocal exercicio_selecionado_id
+            exercicio_selecionado_id = ex_obj.id
+            txt_ex_analise_titulo.value = ex_obj.nome
+            txt_ex_analise_sub.value = (
+                f"{ex_obj.grupo_muscular} • {ex_obj.equipamento}"
+            )
+            page.pop_dialog()
+            renderizar(atualizar_pagina=True)
+
+        def _popular_exercicios(termo_busca: str = "") -> None:
+            termo = termo_busca.strip().lower()
+            itens_lv: list[ft.Control] = []
+            for ex in exercicios_disp:
+                if (
+                    not termo
+                    or termo in ex.nome.lower()
+                    or termo in ex.grupo_muscular.lower()
+                    or termo in ex.equipamento.lower()
+                ):
+                    selecionado = ex.id == exercicio_selecionado_id
+                    itens_lv.append(
+                        ft.Container(
+                            bgcolor=ORCELA_DARK_SURFACE
+                            if selecionado
+                            else DARK_BG,
+                            border=ft.Border.all(
+                                1,
+                                ORCELA_BLUE
+                                if selecionado
+                                else ORCELA_BORDER_GLOW,
+                            ),
+                            border_radius=8,
+                            padding=ft.Padding.symmetric(
+                                horizontal=12, vertical=8
+                            ),
+                            on_click=lambda _, e_item=ex: _selecionar_ex_analise(
+                                e_item
+                            ),
+                            content=ft.Row(
+                                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                spacing=8,
+                                controls=[
+                                    ft.Column(
+                                        spacing=2,
+                                        expand=True,
+                                        controls=[
+                                            ft.Text(
+                                                ex.nome,
+                                                size=13,
+                                                weight=ft.FontWeight.BOLD,
+                                                color=PURE_WHITE,
+                                            ),
+                                            ft.Text(
+                                                f"{ex.grupo_muscular} • {ex.equipamento}",
+                                                size=11,
+                                                color=ORCELA_BLUE,
+                                                weight=ft.FontWeight.W_500,
+                                            ),
+                                        ],
+                                    ),
+                                    ft.Icon(
+                                        ft.Icons.CHECK_CIRCLE_ROUNDED
+                                        if selecionado
+                                        else ft.Icons.CHEVRON_RIGHT_ROUNDED,
+                                        color=ORCELA_BLUE
+                                        if selecionado
+                                        else TEXT_MUTED,
+                                        size=18,
+                                    ),
+                                ],
+                            ),
+                        )
+                    )
+            if not itens_lv:
+                itens_lv.append(
+                    ft.Container(
+                        padding=16,
+                        alignment=ft.Alignment.CENTER,
+                        content=ft.Text(
+                            "Nenhum exercício encontrado.",
+                            size=12,
+                            color=TEXT_MUTED,
+                        ),
+                    )
+                )
+            lista_filtrada.controls = itens_lv
+
+        tf_busca_ex = ft.TextField(
+            hint_text="Buscar exercício ou músculo...",
+            autofocus=True,
+            prefix_icon=ft.Icons.SEARCH_ROUNDED,
+            border=construir_borda_input(),
+            color=PURE_WHITE,
+            text_size=13,
+            content_padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+            on_change=lambda e: (
+                _popular_exercicios(e.control.value or ""),
+                page.update(),
+            ),
+        )
+
+        _popular_exercicios("")
+
+        dlg_ex = ft.AlertDialog(
+            bgcolor=CARD_BG,
+            shape=ft.RoundedRectangleBorder(
+                radius=14,
+                side=ft.BorderSide(width=1, color=ORCELA_BORDER_HIGHLIGHT),
+            ),
+            title=ft.Row(
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                controls=[
+                    ft.Text(
+                        "Analisar Exercício",
+                        size=16,
+                        weight=ft.FontWeight.BOLD,
+                        color=PURE_WHITE,
+                    ),
+                    ft.IconButton(
+                        icon=ft.Icons.CLOSE_ROUNDED,
+                        icon_color=TEXT_MUTED,
+                        width=32,
+                        height=32,
+                        icon_size=18,
+                        on_click=lambda _: page.pop_dialog(),
+                    ),
+                ],
+            ),
+            content=ft.Container(
+                width=320,
+                content=ft.Column(
+                    tight=True,
+                    spacing=10,
+                    controls=[
+                        tf_busca_ex,
+                        lista_filtrada,
+                    ],
+                ),
+            ),
+        )
+        page.show_dialog(dlg_ex)
+
+    btn_seletor_exercicio = ft.Container(
+        expand=True,
+        bgcolor="#141414",
+        border=ft.Border.all(1, ORCELA_BORDER_GLOW),
+        border_radius=10,
+        padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+        on_click=abrir_modal_analise_exercicio,
+        content=ft.Row(
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=8,
+            controls=[
+                ft.Icon(
+                    ft.Icons.SEARCH_ROUNDED,
+                    color=ORCELA_BLUE,
+                    size=20,
+                ),
+                ft.Column(
+                    spacing=1,
+                    expand=True,
+                    controls=[
+                        txt_ex_analise_titulo,
+                        txt_ex_analise_sub,
+                    ],
+                ),
+                ft.Icon(
+                    ft.Icons.KEYBOARD_ARROW_DOWN_ROUNDED,
+                    color=ORCELA_BLUE,
+                    size=22,
+                ),
+            ],
+        ),
     )
 
     tf_bio_peso = ft.TextField(
@@ -422,32 +616,23 @@ def build_stats_view(page: ft.Page) -> ft.Control:
             ),
         )
 
-    def ao_mudar_exercicio(_: Any = None) -> None:
-        nonlocal exercicio_selecionado_id
-        if dd_seletor_exercicio.value:
-            exercicio_selecionado_id = int(dd_seletor_exercicio.value)
-        renderizar(atualizar_pagina=True)
-
-    dd_seletor_exercicio.on_select = ao_mudar_exercicio
-
     def renderizar(atualizar_pagina: bool = True) -> None:
         nonlocal exercicio_selecionado_id
         metricas = obter_metricas_gerais()
         biometria = obter_historico_biometria()
         exercicios = listar_exercicios_para_analise()
 
-        dd_seletor_exercicio.options = [
-            ft.dropdown.Option(
-                key=str(ex.id), text=f"{ex.nome} • {ex.grupo_muscular}"
+        if exercicios:
+            if exercicio_selecionado_id is None:
+                exercicio_selecionado_id = exercicios[0].id
+            ex_sel = next(
+                (e for e in exercicios if e.id == exercicio_selecionado_id),
+                exercicios[0],
             )
-            for ex in exercicios
-        ]
-
-        if exercicios and exercicio_selecionado_id is None:
-            exercicio_selecionado_id = exercicios[0].id
-            dd_seletor_exercicio.value = str(exercicio_selecionado_id)
-        elif exercicio_selecionado_id is not None:
-            dd_seletor_exercicio.value = str(exercicio_selecionado_id)
+            txt_ex_analise_titulo.value = ex_sel.nome
+            txt_ex_analise_sub.value = (
+                f"{ex_sel.grupo_muscular} • {ex_sel.equipamento}"
+            )
 
         historico_ex = (
             obter_evolucao_exercicio(exercicio_selecionado_id)
@@ -802,7 +987,7 @@ def build_stats_view(page: ft.Page) -> ft.Control:
                             weight=ft.FontWeight.BOLD,
                             color=TEXT_MUTED,
                         ),
-                        ft.Row(controls=[dd_seletor_exercicio]),
+                        ft.Row(controls=[btn_seletor_exercicio]),
                         ft.Row(
                             spacing=10,
                             controls=[

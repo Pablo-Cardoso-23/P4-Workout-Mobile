@@ -78,6 +78,7 @@ def construir_logo_p4() -> ft.Text:
 def build_routines_view(page: ft.Page) -> ft.Control:
     """Constrói a view modular de Gestão de Fichas e Catálogo de Exercícios."""
     itens_rascunho: list[dict[str, Any]] = []
+    exercicio_selecionado_id: int | None = None
     form_ficha_visivel = False
     form_exercicio_visivel = False
     form_exercicio_inline_visivel = False
@@ -113,11 +114,19 @@ def build_routines_view(page: ft.Page) -> ft.Control:
         text_size=13,
     )
 
-    dd_exercicio = ft.Dropdown(
-        label="Selecionar Exercício",
-        border=construir_borda_input(),
+    txt_exercicio_selecionado = ft.Text(
+        "Selecionar Exercício...",
+        size=13,
+        weight=ft.FontWeight.BOLD,
         color=PURE_WHITE,
         expand=True,
+        max_lines=1,
+        overflow=ft.TextOverflow.ELLIPSIS,
+    )
+    txt_grupo_selecionado = ft.Text(
+        "Toque para buscar",
+        size=11,
+        color=ORCELA_BLUE,
     )
     tf_series_alvo = ft.TextField(
         label="Séries",
@@ -170,15 +179,207 @@ def build_routines_view(page: ft.Page) -> ft.Control:
     )
 
     def atualizar_opcoes_exercicios() -> dict[int, str]:
+        nonlocal exercicio_selecionado_id
         exercicios = listar_exercicios()
         mapa = {ex.id: f"{ex.nome} ({ex.grupo_muscular})" for ex in exercicios}
-        dd_exercicio.options = [
-            ft.dropdown.Option(key=str(ex.id), text=f"{ex.nome} • {ex.grupo_muscular}")
-            for ex in exercicios
-        ]
-        if exercicios and not dd_exercicio.value:
-            dd_exercicio.value = str(exercicios[0].id)
+        if exercicios:
+            if exercicio_selecionado_id is None or exercicio_selecionado_id not in mapa:
+                exercicio_selecionado_id = exercicios[0].id
+            ex_sel = next(
+                (e for e in exercicios if e.id == exercicio_selecionado_id),
+                exercicios[0],
+            )
+            txt_exercicio_selecionado.value = ex_sel.nome
+            txt_grupo_selecionado.value = (
+                f"{ex_sel.grupo_muscular} • {ex_sel.equipamento}"
+            )
+        else:
+            txt_exercicio_selecionado.value = "Nenhum exercício cadastrado"
+            txt_grupo_selecionado.value = ""
         return mapa
+
+    def abrir_modal_busca_exercicio(_: Any = None) -> None:
+        nonlocal exercicio_selecionado_id
+        todos_exercicios = listar_exercicios()
+
+        lista_filtrada = ft.ListView(
+            height=280,
+            spacing=4,
+        )
+
+        def _selecionar_exercicio(ex_obj: Any) -> None:
+            nonlocal exercicio_selecionado_id
+            exercicio_selecionado_id = ex_obj.id
+            txt_exercicio_selecionado.value = ex_obj.nome
+            txt_grupo_selecionado.value = (
+                f"{ex_obj.grupo_muscular} • {ex_obj.equipamento}"
+            )
+            page.pop_dialog()
+            page.update()
+
+        def _popular_lista(termo_busca: str = "") -> None:
+            termo = termo_busca.strip().lower()
+            itens_lv: list[ft.Control] = []
+            for ex in todos_exercicios:
+                if (
+                    not termo
+                    or termo in ex.nome.lower()
+                    or termo in ex.grupo_muscular.lower()
+                    or termo in ex.equipamento.lower()
+                ):
+                    selecionado = ex.id == exercicio_selecionado_id
+                    itens_lv.append(
+                        ft.Container(
+                            bgcolor=ORCELA_DARK_SURFACE
+                            if selecionado
+                            else DARK_BG,
+                            border=ft.Border.all(
+                                1,
+                                ORCELA_BLUE
+                                if selecionado
+                                else ORCELA_BORDER_GLOW,
+                            ),
+                            border_radius=8,
+                            padding=ft.Padding.symmetric(
+                                horizontal=12, vertical=8
+                            ),
+                            on_click=lambda _, e_item=ex: _selecionar_exercicio(
+                                e_item
+                            ),
+                            content=ft.Row(
+                                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                spacing=8,
+                                controls=[
+                                    ft.Column(
+                                        spacing=2,
+                                        expand=True,
+                                        controls=[
+                                            ft.Text(
+                                                ex.nome,
+                                                size=13,
+                                                weight=ft.FontWeight.BOLD,
+                                                color=PURE_WHITE,
+                                            ),
+                                            ft.Text(
+                                                f"{ex.grupo_muscular} • {ex.equipamento}",
+                                                size=11,
+                                                color=ORCELA_BLUE,
+                                                weight=ft.FontWeight.W_500,
+                                            ),
+                                        ],
+                                    ),
+                                    ft.Icon(
+                                        ft.Icons.CHECK_CIRCLE_ROUNDED
+                                        if selecionado
+                                        else ft.Icons.CHEVRON_RIGHT_ROUNDED,
+                                        color=ORCELA_BLUE
+                                        if selecionado
+                                        else TEXT_MUTED,
+                                        size=18,
+                                    ),
+                                ],
+                            ),
+                        )
+                    )
+            if not itens_lv:
+                itens_lv.append(
+                    ft.Container(
+                        padding=16,
+                        alignment=ft.Alignment.CENTER,
+                        content=ft.Text(
+                            "Nenhum exercício encontrado para esta busca.",
+                            size=12,
+                            color=TEXT_MUTED,
+                        ),
+                    )
+                )
+            lista_filtrada.controls = itens_lv
+
+        tf_busca_ex = ft.TextField(
+            hint_text="Buscar exercício ou músculo...",
+            autofocus=True,
+            prefix_icon=ft.Icons.SEARCH_ROUNDED,
+            border=construir_borda_input(),
+            color=PURE_WHITE,
+            text_size=13,
+            content_padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+            on_change=lambda e: (_popular_lista(e.control.value or ""), page.update()),
+        )
+
+        _popular_lista("")
+
+        dlg_busca = ft.AlertDialog(
+            bgcolor=CARD_BG,
+            shape=ft.RoundedRectangleBorder(
+                radius=14, side=ft.BorderSide(width=1, color=ORCELA_BORDER_HIGHLIGHT)
+            ),
+            title=ft.Row(
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                controls=[
+                    ft.Text(
+                        "Selecionar Exercício",
+                        size=16,
+                        weight=ft.FontWeight.BOLD,
+                        color=PURE_WHITE,
+                    ),
+                    ft.IconButton(
+                        icon=ft.Icons.CLOSE_ROUNDED,
+                        icon_color=TEXT_MUTED,
+                        width=32,
+                        height=32,
+                        icon_size=18,
+                        on_click=lambda _: page.pop_dialog(),
+                    ),
+                ],
+            ),
+            content=ft.Container(
+                width=320,
+                content=ft.Column(
+                    tight=True,
+                    spacing=10,
+                    controls=[
+                        tf_busca_ex,
+                        lista_filtrada,
+                    ],
+                ),
+            ),
+        )
+        page.show_dialog(dlg_busca)
+
+    btn_seletor_exercicio = ft.Container(
+        expand=True,
+        bgcolor=DARK_BG,
+        border=ft.Border.all(1, ORCELA_BORDER_GLOW),
+        border_radius=8,
+        padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+        on_click=abrir_modal_busca_exercicio,
+        content=ft.Row(
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=8,
+            controls=[
+                ft.Icon(
+                    ft.Icons.SEARCH_ROUNDED,
+                    color=ORCELA_BLUE,
+                    size=20,
+                ),
+                ft.Column(
+                    spacing=1,
+                    expand=True,
+                    controls=[
+                        txt_exercicio_selecionado,
+                        txt_grupo_selecionado,
+                    ],
+                ),
+                ft.Icon(
+                    ft.Icons.KEYBOARD_ARROW_DOWN_ROUNDED,
+                    color=ORCELA_BLUE,
+                    size=22,
+                ),
+            ],
+        ),
+    )
 
     def alternar_form_ficha(_: Any = None) -> None:
         nonlocal form_ficha_visivel, form_exercicio_inline_visivel
@@ -198,7 +399,7 @@ def build_routines_view(page: ft.Page) -> ft.Control:
         renderizar()
 
     def salvar_novo_exercicio(_: Any = None) -> None:
-        nonlocal form_exercicio_visivel, form_exercicio_inline_visivel
+        nonlocal form_exercicio_visivel, form_exercicio_inline_visivel, exercicio_selecionado_id
         try:
             novo = criar_exercicio(
                 nome=tf_novo_ex_nome.value or "",
@@ -208,19 +409,19 @@ def build_routines_view(page: ft.Page) -> ft.Control:
             tf_novo_ex_nome.value = ""
             form_exercicio_visivel = False
             form_exercicio_inline_visivel = False
+            exercicio_selecionado_id = novo.id
             atualizar_opcoes_exercicios()
-            dd_exercicio.value = str(novo.id)
             notificar(f"Exercício '{novo.nome}' criado e selecionado!")
             renderizar()
         except Exception as exc:
             notificar(str(exc), erro=True)
 
     def adicionar_item_rascunho(_: Any = None) -> None:
-        if not dd_exercicio.value:
+        if exercicio_selecionado_id is None:
             notificar("Selecione um exercício do catálogo.", erro=True)
             return
         try:
-            ex_id = int(dd_exercicio.value)
+            ex_id = int(exercicio_selecionado_id)
             series = max(1, int(tf_series_alvo.value or "4"))
             descanso = max(15, int(tf_descanso.value or "90"))
             reps = (tf_reps_alvo.value or "8-12").strip()
@@ -681,7 +882,7 @@ def build_routines_view(page: ft.Page) -> ft.Control:
 
             controles_form_ficha.extend(
                 [
-                    ft.Row(controls=[dd_exercicio]),
+                    ft.Row(controls=[btn_seletor_exercicio]),
                     ft.Row(
                         spacing=8,
                         controls=[

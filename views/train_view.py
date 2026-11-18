@@ -417,6 +417,88 @@ def build_train_view(page: ft.Page) -> ft.Control:
         )
         page.show_dialog(dlg_info)
 
+    def abrir_legenda_rir(_: Any = None) -> None:
+        itens_rir = [
+            (
+                "Conceito",
+                "Quantas repetições limpas você ainda conseguiria fazer antes de atingir a falha muscular total.",
+            ),
+            (
+                "0 RIR",
+                "Falha total (nenhuma repetição sobrando).",
+            ),
+            (
+                "1–2 RIR",
+                "Esforço muito alto, ideal para hipertrofia nas séries principais.",
+            ),
+            (
+                "3+ RIR",
+                "Esforço moderado / série de controle ou aquecimento.",
+            ),
+        ]
+        controles_rir: list[ft.Control] = []
+        for titulo_rir, desc_rir in itens_rir:
+            controles_rir.append(
+                ft.Container(
+                    bgcolor=DARK_BG,
+                    border=ft.Border.all(1, ORCELA_BORDER_GLOW),
+                    border_radius=8,
+                    padding=10,
+                    content=ft.Column(
+                        spacing=3,
+                        controls=[
+                            ft.Text(
+                                titulo_rir,
+                                size=13,
+                                weight=ft.FontWeight.BOLD,
+                                color=ORCELA_BLUE,
+                            ),
+                            ft.Text(
+                                desc_rir,
+                                size=12,
+                                color=PURE_WHITE,
+                            ),
+                        ],
+                    ),
+                )
+            )
+
+        dlg_rir = ft.AlertDialog(
+            bgcolor=CARD_BG,
+            shape=ft.RoundedRectangleBorder(
+                radius=14, side=ft.BorderSide(width=1, color=ORCELA_BORDER_GLOW)
+            ),
+            title=ft.Row(
+                spacing=8,
+                controls=[
+                    ft.Icon(
+                        ft.Icons.INFO_OUTLINE_ROUNDED,
+                        color=ORCELA_BLUE,
+                        size=22,
+                    ),
+                    ft.Text(
+                        "O que é RIR (Repetições na Reserva)?",
+                        size=15,
+                        weight=ft.FontWeight.BOLD,
+                        color=PURE_WHITE,
+                        expand=True,
+                    ),
+                ],
+            ),
+            content=ft.Column(
+                tight=True,
+                spacing=8,
+                controls=controles_rir,
+            ),
+            actions=[
+                ft.TextButton(
+                    content="Entendi",
+                    on_click=lambda _: page.pop_dialog(),
+                )
+            ],
+        )
+        page.show_dialog(dlg_rir)
+
     def descartar_sessao_ativa(_: Any = None) -> None:
         nonlocal sessao_ativa_id, sessao_data_inicio, ficha_ativa, confirmando_fim_ativo
         parar_cronometro(atualizar_pagina=False)
@@ -495,9 +577,72 @@ def build_train_view(page: ft.Page) -> ft.Control:
         renderizar()
 
     def abrir_confirmacao_fim_treino(_: Any = None) -> None:
-        nonlocal confirmando_fim_ativo
-        confirmando_fim_ativo = True
-        renderizar()
+        def _confirmar_e_fechar_modal(_: Any = None) -> None:
+            try:
+                page.pop_dialog()
+            except Exception:
+                pass
+            concluir_treino_ativo()
+
+        dlg_finalizar = ft.AlertDialog(
+            bgcolor=CARD_BG,
+            shape=ft.RoundedRectangleBorder(
+                radius=14,
+                side=ft.BorderSide(width=1, color=ORCELA_BORDER_HIGHLIGHT),
+            ),
+            title=ft.Row(
+                spacing=8,
+                controls=[
+                    ft.Icon(
+                        ft.Icons.CHECK_CIRCLE_ROUNDED,
+                        color=ORCELA_BLUE,
+                        size=22,
+                    ),
+                    ft.Text(
+                        "Resumo de Intensidade da Sessão",
+                        size=15,
+                        weight=ft.FontWeight.BOLD,
+                        color=PURE_WHITE,
+                        expand=True,
+                    ),
+                ],
+            ),
+            content=ft.Container(
+                width=330,
+                content=ft.Column(
+                    tight=True,
+                    spacing=10,
+                    controls=[
+                        ft.Row(
+                            spacing=8,
+                            controls=[
+                                tf_calorias_ativo,
+                                tf_fc_ativo,
+                                tf_rpe_ativo,
+                            ],
+                        ),
+                        tf_notas_sessao,
+                    ],
+                ),
+            ),
+            actions=[
+                ft.TextButton(
+                    content="Voltar",
+                    on_click=lambda _: page.pop_dialog(),
+                ),
+                ft.Button(
+                    content="CONFIRMAR E SALVAR TREINO",
+                    icon=ft.Icons.CHECK_CIRCLE_ROUNDED,
+                    bgcolor=ORCELA_BLUE,
+                    color=PURE_WHITE,
+                    style=ft.ButtonStyle(
+                        shape=ft.RoundedRectangleBorder(radius=10),
+                    ),
+                    on_click=_confirmar_e_fechar_modal,
+                ),
+            ],
+        )
+        page.show_dialog(dlg_finalizar)
 
     def concluir_treino_ativo(_: Any = None) -> None:
         nonlocal sessao_ativa_id, sessao_data_inicio, ficha_ativa, confirmando_fim_ativo
@@ -819,12 +964,30 @@ def build_train_view(page: ft.Page) -> ft.Control:
                             expand=True,
                             text_align=ft.TextAlign.CENTER,
                         ),
-                        ft.Text(
-                            "RIR",
-                            size=11,
-                            color=TEXT_MUTED,
-                            expand=True,
-                            text_align=ft.TextAlign.CENTER,
+                        ft.GestureDetector(
+                            on_tap=abrir_legenda_rir,
+                            content=ft.Container(
+                                expand=True,
+                                tooltip="Ver significado de RIR",
+                                content=ft.Row(
+                                    alignment=ft.MainAxisAlignment.CENTER,
+                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                    spacing=3,
+                                    controls=[
+                                        ft.Text(
+                                            "RIR",
+                                            size=11,
+                                            weight=ft.FontWeight.BOLD,
+                                            color=ORCELA_BLUE,
+                                        ),
+                                        ft.Icon(
+                                            ft.Icons.INFO_OUTLINE_ROUNDED,
+                                            size=14,
+                                            color=ORCELA_BLUE,
+                                        ),
+                                    ],
+                                ),
+                            ),
                         ),
                         ft.Text(
                             "OK",
@@ -916,61 +1079,19 @@ def build_train_view(page: ft.Page) -> ft.Control:
                 )
             )
 
-        bloco_finalizacao: list[ft.Control] = []
-        if confirmando_fim_ativo:
-            bloco_finalizacao.append(
-                ft.Container(
-                    bgcolor=CARD_BG,
-                    border=ft.Border.all(1, ORCELA_BORDER_HIGHLIGHT),
-                    shadow=construir_sombra_orcela(),
-                    border_radius=12,
-                    padding=14,
-                    content=ft.Column(
-                        spacing=10,
-                        controls=[
-                            ft.Text(
-                                "Resumo de Intensidade da Sessão",
-                                size=14,
-                                weight=ft.FontWeight.BOLD,
-                                color=PURE_WHITE,
-                            ),
-                            ft.Row(
-                                spacing=8,
-                                controls=[tf_calorias_ativo, tf_fc_ativo, tf_rpe_ativo],
-                            ),
-                            tf_notas_sessao,
-                            ft.Button(
-                                content="CONFIRMAR E SALVAR TREINO",
-                                icon=ft.Icons.CHECK_CIRCLE_ROUNDED,
-                                bgcolor=ORCELA_BLUE,
-                                color=PURE_WHITE,
-                                width=float("inf"),
-                                style=ft.ButtonStyle(
-                                    shape=ft.RoundedRectangleBorder(radius=10),
-                                ),
-                                on_click=concluir_treino_ativo,
-                            ),
-                        ],
-                    ),
-                )
-            )
-        else:
-            bloco_finalizacao.extend(
-                [
-                    tf_notas_sessao,
-                    ft.Button(
-                        content="FINALIZAR TREINO",
-                        icon=ft.Icons.CHECK_CIRCLE_ROUNDED,
-                        bgcolor=ORCELA_BLUE,
-                        color=PURE_WHITE,
-                        width=float("inf"),
-                        style=ft.ButtonStyle(
-                            shape=ft.RoundedRectangleBorder(radius=10),
-                        ),
-                        on_click=abrir_confirmacao_fim_treino,
-                    ),
-                ]
-            )
+        bloco_finalizacao: list[ft.Control] = [
+            ft.Button(
+                content="FINALIZAR TREINO",
+                icon=ft.Icons.CHECK_CIRCLE_ROUNDED,
+                bgcolor=ORCELA_BLUE,
+                color=PURE_WHITE,
+                width=float("inf"),
+                style=ft.ButtonStyle(
+                    shape=ft.RoundedRectangleBorder(radius=10),
+                ),
+                on_click=abrir_confirmacao_fim_treino,
+            ),
+        ]
 
         painel_topo_fixo = ft.Container(
             bgcolor=CARD_BG,
@@ -1080,6 +1201,7 @@ def build_train_view(page: ft.Page) -> ft.Control:
         )
 
         corpo_rolavel = ft.Column(
+            key="active_session_scroll",
             scroll=ft.ScrollMode.HIDDEN,
             expand=True,
             spacing=14,

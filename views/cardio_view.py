@@ -5,6 +5,7 @@ import flet as ft
 
 from services.cardio_service import (
     MODALIDADES_CARDIO,
+    TABELA_METS,
     calcular_metricas_cardio,
     excluir_sessao_cardio,
     formatar_tempo_segundos,
@@ -77,16 +78,290 @@ def build_cardio_view(page: ft.Page) -> ft.Control:
         color=TEXT_MUTED,
     )
 
-    dd_modalidade_vivo = ft.Dropdown(
-        label="Modalidade ao Vivo",
-        value="Corrida Rua",
-        border=construir_borda_input(),
+    modalidade_vivo_selecionada: str = "Corrida Rua"
+    modalidade_manual_selecionada: str = "Corrida Rua"
+
+    txt_mod_vivo_titulo = ft.Text(
+        modalidade_vivo_selecionada,
+        size=13,
+        weight=ft.FontWeight.BOLD,
         color=PURE_WHITE,
         expand=True,
-        options=[
-            ft.dropdown.Option(key=m, text=m) for m in MODALIDADES_CARDIO
-        ],
+        max_lines=1,
+        overflow=ft.TextOverflow.ELLIPSIS,
     )
+    txt_mod_vivo_sub = ft.Text(
+        f"Modalidade ao Vivo • {TABELA_METS.get(modalidade_vivo_selecionada, 8.0):g} METs",
+        size=11,
+        color=ORCELA_BLUE,
+    )
+
+    txt_mod_manual_titulo = ft.Text(
+        modalidade_manual_selecionada,
+        size=13,
+        weight=ft.FontWeight.BOLD,
+        color=PURE_WHITE,
+        expand=True,
+        max_lines=1,
+        overflow=ft.TextOverflow.ELLIPSIS,
+    )
+    txt_mod_manual_sub = ft.Text(
+        f"Modalidade • {TABELA_METS.get(modalidade_manual_selecionada, 8.0):g} METs",
+        size=11,
+        color=ORCELA_BLUE,
+    )
+
+    def _atualizar_previa_vivo() -> None:
+        if cronometro_rodando:
+            txt_preview_vivo.value = f"Em andamento • {modalidade_vivo_selecionada}"
+            txt_preview_vivo.color = ORCELA_BLUE
+        elif aguardando_finalizacao_ao_vivo:
+            try:
+                dist_v = float((tf_dist_vivo.value or "0").replace(",", "."))
+            except ValueError:
+                dist_v = 0.0
+            dur_est = cronometro_segundos if cronometro_segundos > 0 else 60
+            prev = calcular_metricas_cardio(
+                modalidade_vivo_selecionada,
+                dur_est,
+                dist_v,
+            )
+            pace_txt = prev["pace_medio_str"] or "-- /km"
+            txt_preview_vivo.value = (
+                f"Prévia: Pace {pace_txt} • ~{prev['calorias_estimadas']} kcal"
+            )
+            txt_preview_vivo.color = ORCELA_BLUE
+
+    def abrir_modal_modalidade_cardio(modo: str) -> None:
+        lista_filtrada = ft.ListView(
+            height=260,
+            spacing=4,
+        )
+
+        def _selecionar_mod(mod_nome: str) -> None:
+            nonlocal modalidade_vivo_selecionada, modalidade_manual_selecionada
+            met_val = TABELA_METS.get(mod_nome, 8.0)
+            if modo == "vivo":
+                modalidade_vivo_selecionada = mod_nome
+                txt_mod_vivo_titulo.value = mod_nome
+                txt_mod_vivo_sub.value = f"Modalidade ao Vivo • {met_val:g} METs"
+                _atualizar_previa_vivo()
+            else:
+                modalidade_manual_selecionada = mod_nome
+                txt_mod_manual_titulo.value = mod_nome
+                txt_mod_manual_sub.value = f"Modalidade • {met_val:g} METs"
+            page.pop_dialog()
+            page.update()
+
+        def _popular_modalidades(termo_busca: str = "") -> None:
+            termo = termo_busca.strip().lower()
+            atual_sel = (
+                modalidade_vivo_selecionada
+                if modo == "vivo"
+                else modalidade_manual_selecionada
+            )
+            itens_lv: list[ft.Control] = []
+            for mod in MODALIDADES_CARDIO:
+                met_v = TABELA_METS.get(mod, 8.0)
+                if not termo or termo in mod.lower():
+                    selecionado = mod == atual_sel
+                    icone_m = ICONES_MODALIDADE.get(
+                        mod, ft.Icons.DIRECTIONS_RUN_ROUNDED
+                    )
+                    itens_lv.append(
+                        ft.Container(
+                            bgcolor=ORCELA_DARK_SURFACE
+                            if selecionado
+                            else DARK_BG,
+                            border=ft.Border.all(
+                                1,
+                                ORCELA_BLUE
+                                if selecionado
+                                else ORCELA_BORDER_GLOW,
+                            ),
+                            border_radius=8,
+                            padding=ft.Padding.symmetric(
+                                horizontal=12, vertical=8
+                            ),
+                            on_click=lambda _, m_sel=mod: _selecionar_mod(m_sel),
+                            content=ft.Row(
+                                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                spacing=8,
+                                controls=[
+                                    ft.Icon(
+                                        icone_m,
+                                        color=ORCELA_BLUE,
+                                        size=20,
+                                    ),
+                                    ft.Column(
+                                        spacing=2,
+                                        expand=True,
+                                        controls=[
+                                            ft.Text(
+                                                mod,
+                                                size=13,
+                                                weight=ft.FontWeight.BOLD,
+                                                color=PURE_WHITE,
+                                            ),
+                                            ft.Text(
+                                                f"Gasto energético: ~{met_v:g} METs",
+                                                size=11,
+                                                color=ORCELA_BLUE,
+                                                weight=ft.FontWeight.W_500,
+                                            ),
+                                        ],
+                                    ),
+                                    ft.Icon(
+                                        ft.Icons.CHECK_CIRCLE_ROUNDED
+                                        if selecionado
+                                        else ft.Icons.CHEVRON_RIGHT_ROUNDED,
+                                        color=ORCELA_BLUE
+                                        if selecionado
+                                        else TEXT_MUTED,
+                                        size=18,
+                                    ),
+                                ],
+                            ),
+                        )
+                    )
+            if not itens_lv:
+                itens_lv.append(
+                    ft.Container(
+                        padding=16,
+                        alignment=ft.Alignment.CENTER,
+                        content=ft.Text(
+                            "Nenhuma modalidade encontrada.",
+                            size=12,
+                            color=TEXT_MUTED,
+                        ),
+                    )
+                )
+            lista_filtrada.controls = itens_lv
+
+        tf_busca_mod = ft.TextField(
+            hint_text="Buscar modalidade...",
+            autofocus=True,
+            prefix_icon=ft.Icons.SEARCH_ROUNDED,
+            border=construir_borda_input(),
+            color=PURE_WHITE,
+            text_size=13,
+            content_padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+            on_change=lambda e: (
+                _popular_modalidades(e.control.value or ""),
+                page.update(),
+            ),
+        )
+
+        _popular_modalidades("")
+
+        dlg_mod = ft.AlertDialog(
+            bgcolor=CARD_BG,
+            shape=ft.RoundedRectangleBorder(
+                radius=14,
+                side=ft.BorderSide(width=1, color=ORCELA_BORDER_HIGHLIGHT),
+            ),
+            title=ft.Row(
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                controls=[
+                    ft.Text(
+                        "Selecionar Modalidade Cardio",
+                        size=16,
+                        weight=ft.FontWeight.BOLD,
+                        color=PURE_WHITE,
+                    ),
+                    ft.IconButton(
+                        icon=ft.Icons.CLOSE_ROUNDED,
+                        icon_color=TEXT_MUTED,
+                        width=32,
+                        height=32,
+                        icon_size=18,
+                        on_click=lambda _: page.pop_dialog(),
+                    ),
+                ],
+            ),
+            content=ft.Container(
+                width=320,
+                content=ft.Column(
+                    tight=True,
+                    spacing=10,
+                    controls=[
+                        tf_busca_mod,
+                        lista_filtrada,
+                    ],
+                ),
+            ),
+        )
+        page.show_dialog(dlg_mod)
+
+    btn_seletor_modalidade_vivo = ft.Container(
+        expand=True,
+        bgcolor="#141414",
+        border=ft.Border.all(1, ORCELA_BORDER_GLOW),
+        border_radius=10,
+        padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+        on_click=lambda _: abrir_modal_modalidade_cardio("vivo"),
+        content=ft.Row(
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=8,
+            controls=[
+                ft.Icon(
+                    ft.Icons.DIRECTIONS_RUN_ROUNDED,
+                    color=ORCELA_BLUE,
+                    size=20,
+                ),
+                ft.Column(
+                    spacing=1,
+                    expand=True,
+                    controls=[
+                        txt_mod_vivo_titulo,
+                        txt_mod_vivo_sub,
+                    ],
+                ),
+                ft.Icon(
+                    ft.Icons.KEYBOARD_ARROW_DOWN_ROUNDED,
+                    color=ORCELA_BLUE,
+                    size=22,
+                ),
+            ],
+        ),
+    )
+
+    btn_seletor_modalidade_manual = ft.Container(
+        expand=True,
+        bgcolor="#141414",
+        border=ft.Border.all(1, ORCELA_BORDER_GLOW),
+        border_radius=10,
+        padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+        on_click=lambda _: abrir_modal_modalidade_cardio("manual"),
+        content=ft.Row(
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=8,
+            controls=[
+                ft.Icon(
+                    ft.Icons.SEARCH_ROUNDED,
+                    color=ORCELA_BLUE,
+                    size=20,
+                ),
+                ft.Column(
+                    spacing=1,
+                    expand=True,
+                    controls=[
+                        txt_mod_manual_titulo,
+                        txt_mod_manual_sub,
+                    ],
+                ),
+                ft.Icon(
+                    ft.Icons.KEYBOARD_ARROW_DOWN_ROUNDED,
+                    color=ORCELA_BLUE,
+                    size=22,
+                ),
+            ],
+        ),
+    )
+
     tf_dist_vivo = ft.TextField(
         label="Distância Percorrida (km)",
         value="5.0",
@@ -114,16 +389,6 @@ def build_cardio_view(page: ft.Page) -> ft.Control:
         width=95,
     )
 
-    dd_modalidade_manual = ft.Dropdown(
-        label="Modalidade",
-        value="Corrida Rua",
-        border=construir_borda_input(),
-        color=PURE_WHITE,
-        expand=True,
-        options=[
-            ft.dropdown.Option(key=m, text=m) for m in MODALIDADES_CARDIO
-        ],
-    )
     tf_tempo_min_manual = ft.TextField(
         label="Tempo (min)",
         value="30",
@@ -182,7 +447,7 @@ def build_cardio_view(page: ft.Page) -> ft.Control:
         cronometro_token += 1
         if cronometro_rodando:
             txt_preview_vivo.value = (
-                f"Em andamento • {dd_modalidade_vivo.value or 'Corrida Rua'}"
+                f"Em andamento • {modalidade_vivo_selecionada}"
             )
             txt_preview_vivo.color = ORCELA_BLUE
             if hasattr(page, "run_task"):
@@ -218,7 +483,7 @@ def build_cardio_view(page: ft.Page) -> ft.Control:
         except ValueError:
             dist_v = 0.0
         prev = calcular_metricas_cardio(
-            dd_modalidade_vivo.value or "Corrida Rua",
+            modalidade_vivo_selecionada,
             cronometro_segundos_estimado,
             dist_v,
         )
@@ -241,7 +506,7 @@ def build_cardio_view(page: ft.Page) -> ft.Control:
             )
             rpe_val = int(tf_rpe_vivo.value or "7")
             sessao = registrar_sessao_cardio(
-                modalidade=dd_modalidade_vivo.value or "Corrida Rua",
+                modalidade=modalidade_vivo_selecionada,
                 duracao_segundos=duracao_final,
                 distancia_km=dist_val,
                 fc_media=fc_val,
@@ -272,7 +537,7 @@ def build_cardio_view(page: ft.Page) -> ft.Control:
             )
             rpe_val = int(tf_rpe_manual.value or "7")
             sessao = registrar_sessao_cardio(
-                modalidade=dd_modalidade_manual.value or "Corrida Rua",
+                modalidade=modalidade_manual_selecionada,
                 duracao_segundos=duracao_seg,
                 distancia_km=dist_val,
                 fc_media=fc_val,
@@ -403,7 +668,7 @@ def build_cardio_view(page: ft.Page) -> ft.Control:
                                     ),
                                 ],
                             ),
-                            ft.Row(controls=[dd_modalidade_manual]),
+                            ft.Row(controls=[btn_seletor_modalidade_manual]),
                             ft.Row(
                                 spacing=8,
                                 controls=[tf_tempo_min_manual, tf_dist_manual],
@@ -448,7 +713,7 @@ def build_cardio_view(page: ft.Page) -> ft.Control:
                     ),
                 ],
             ),
-            ft.Row(controls=[dd_modalidade_vivo]),
+            ft.Row(controls=[btn_seletor_modalidade_vivo]),
             ft.Container(
                 bgcolor=DARK_BG,
                 border=ft.Border.all(
